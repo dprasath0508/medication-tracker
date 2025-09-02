@@ -283,3 +283,10 @@ class MedicationDB:
             if result[0] == 0:
                 return 0.0
             return (result[1] / result[0]) * 100
+    
+    def get_users(self) -> List[Dict[str, Any]]:
+        """Get all users."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM users")
+            return [dict(row) for row in cursor.fetchall()]
