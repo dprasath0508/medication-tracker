@@ -11,12 +11,16 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import sys
 import os
+import sqlite3
+import time
 
 # Add the current directory to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from utils.database import MedicationDB
 from models.family import FamilyCircleManager
+from services.auth import AuthService
+from services.notifications import NotificationService
 
 # Page configuration
 st.set_page_config(
@@ -203,15 +207,35 @@ st.markdown("""
         text-align: center;
         font-weight: bold;
     }
+    
+    /* Medication log card */
+    .med-log-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 10px;
+        border-left: 4px solid #4a7c59;
+        margin: 1rem 0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
 </style>
 """, unsafe_allow_html=True)
 
 def init_database():
-    """Initialize database and family manager."""
+    """Initialize database, family manager, and auth service."""
     if 'db' not in st.session_state:
         st.session_state.db = MedicationDB()
         st.session_state.family_manager = FamilyCircleManager(st.session_state.db)
+        st.session_state.notification_service = NotificationService()
+        st.session_state.auth_service = AuthService(
+            st.session_state.db,
+            st.session_state.notification_service
+        )
     return st.session_state.db, st.session_state.family_manager
+
+def get_auth_service():
+    """Get the auth service instance."""
+    init_database()
+    return st.session_state.auth_service
 
 def init_user_session():
     """Initialize user session variables."""
@@ -225,63 +249,85 @@ def init_user_session():
         st.session_state.show_login = True
     if 'show_register' not in st.session_state:
         st.session_state.show_register = False
+    # New auth flow states
+    if 'auth_step' not in st.session_state:
+        st.session_state.auth_step = 'phone'  # 'phone', 'otp', 'complete_profile', 'email_login'
+    if 'auth_phone' not in st.session_state:
+        st.session_state.auth_phone = None
+    if 'otp_sent_time' not in st.session_state:
+        st.session_state.otp_sent_time = None
+    if 'session_token' not in st.session_state:
+        st.session_state.session_token = None
+    if 'is_new_user' not in st.session_state:
+        st.session_state.is_new_user = False
 
 def show_login_screen():
-    """Show login screen for returning users."""
-    st.markdown('<h1 class="welcome-header">🏥 Welcome Back to FamilyCare</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="welcome-subheader">Sign in to continue managing your family\'s health</p>', unsafe_allow_html=True)
-    
-    # Login form
-    with st.form("login_form"):
-        st.markdown("### 🔐 Sign In")
-        email = st.text_input("Email Address", placeholder="your.email@example.com")
-        
-        # Simple password for demo (in production, use proper authentication)
-        password = st.text_input("Password", type="password", placeholder="Enter your password")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            login_submitted = st.form_submit_button("🔑 Sign In", use_container_width=True)
-        with col2:
-            if st.form_submit_button("📝 Create Account", use_container_width=True):
-                st.session_state.show_login = False
-                st.session_state.show_register = True
-                st.rerun()
-        
-        if login_submitted:
-            if email:
-                db, family_manager = init_database()
-                existing_user = db.get_user_by_email(email)
-                
-                if existing_user:
-                    # Simple authentication (in production, check password hash)
-                    st.session_state.user_profile = {
-                        'id': existing_user['id'],
-                        'name': existing_user['name'],
-                        'email': existing_user['email'],
-                        'age': existing_user['age'],
-                        'type': existing_user['role'],
-                        'phone': existing_user['phone'] or '',
-                        'relationship': 'family_member'  # Default
-                    }
-                    
-                    # Check if user has family circles
-                    user_circles = db.get_user_family_circles(existing_user['id'])
-                    st.session_state.onboarding_complete = len(user_circles) > 0
-                    
-                    st.session_state.show_login = False
-                    st.success(f"✅ Welcome back, {existing_user['name']}!")
+    """Show Life360-style login screen with phone-first approach."""
+    auth_step = st.session_state.get('auth_step', 'phone')
+
+    if auth_step == 'phone':
+        show_phone_login()
+    elif auth_step == 'otp':
+        show_otp_verification()
+    elif auth_step == 'complete_profile':
+        show_complete_profile()
+    elif auth_step == 'email_login':
+        show_email_login()
+    else:
+        show_phone_login()
+
+
+def show_phone_login():
+    """Show phone number login screen (Life360 style)."""
+    st.markdown('<h1 class="welcome-header">🏥 Welcome to FamilyCare</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="welcome-subheader">Keep your loved ones healthy and connected</p>', unsafe_allow_html=True)
+
+    st.markdown("### 📱 Sign in with your phone number")
+
+    with st.form("phone_login_form"):
+        phone = st.text_input(
+            "Phone Number",
+            placeholder="+1 (555) 123-4567",
+            help="We'll send you a verification code"
+        )
+
+        submitted = st.form_submit_button("Continue with Phone", use_container_width=True, type="primary")
+
+        if submitted:
+            if phone:
+                auth = get_auth_service()
+                result = auth.request_otp(phone, purpose='login')
+
+                if result['success']:
+                    st.session_state.auth_phone = result['phone']
+                    st.session_state.otp_sent_time = time.time()
+                    st.session_state.auth_step = 'otp'
+                    st.success(result['message'])
                     st.rerun()
                 else:
-                    st.error("❌ No account found with this email address.")
-                    st.info("💡 Click 'Create Account' to register as a new user.")
+                    st.error(result['error'])
             else:
-                st.error("Please enter your email address.")
-    
+                st.error("Please enter your phone number")
+
+    st.markdown("---")
+    st.markdown('<p style="text-align: center; color: #666;">or</p>', unsafe_allow_html=True)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📧 Use Email Instead", use_container_width=True):
+            st.session_state.auth_step = 'email_login'
+            st.rerun()
+    with col2:
+        if st.button("📝 Create Account", use_container_width=True):
+            st.session_state.show_login = False
+            st.session_state.show_register = True
+            st.rerun()
+
     # Demo options
     st.markdown("---")
     with st.expander("🔧 Demo Options", expanded=False):
         st.markdown("**For demo/portfolio purposes:**")
+        st.info("💡 In demo mode, OTP codes are logged to console. Check terminal for the code.")
         col1, col2 = st.columns(2)
         with col1:
             if st.button("👤 Skip Login (Guest Mode)", type="secondary"):
@@ -289,85 +335,391 @@ def show_login_screen():
                 st.rerun()
         with col2:
             if st.button("🗑️ Reset All Data", type="secondary"):
-                import os
                 db_path = "data/medications.db"
                 if os.path.exists(db_path):
                     os.remove(db_path)
-                    # Clear all session state
+                    for key in list(st.session_state.keys()):
+                        del st.session_state[key]
+                    st.success("✅ All data cleared!")
+                    st.rerun()
+
+
+def show_otp_verification():
+    """Show OTP verification screen."""
+    st.markdown('<h1 class="welcome-header">🔐 Verify Your Phone</h1>', unsafe_allow_html=True)
+
+    phone = st.session_state.auth_phone
+    phone_display = f"***-***-{phone[-4:]}" if phone and len(phone) >= 4 else "your phone"
+    st.markdown(f'<p class="welcome-subheader">We sent a 6-digit code to {phone_display}</p>', unsafe_allow_html=True)
+
+    # Calculate time remaining
+    sent_time = st.session_state.get('otp_sent_time', time.time())
+    elapsed = time.time() - sent_time
+    remaining = max(0, 300 - elapsed)  # 5 minutes = 300 seconds
+
+    if remaining > 0:
+        mins, secs = divmod(int(remaining), 60)
+        st.info(f"⏱️ Code expires in {mins}:{secs:02d}")
+    else:
+        st.warning("⚠️ Code may have expired. Request a new one.")
+
+    with st.form("otp_form"):
+        otp_code = st.text_input(
+            "Verification Code",
+            max_chars=6,
+            placeholder="Enter 6-digit code",
+            help="Check your SMS messages"
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            verify_submitted = st.form_submit_button("✅ Verify", use_container_width=True, type="primary")
+        with col2:
+            back_submitted = st.form_submit_button("← Back", use_container_width=True)
+
+        if verify_submitted:
+            if otp_code and len(otp_code) == 6:
+                auth = get_auth_service()
+                result = auth.verify_otp(phone, otp_code)
+
+                if result['success']:
+                    if result.get('is_new_user'):
+                        # New user - need to complete profile
+                        st.session_state.is_new_user = True
+                        st.session_state.auth_step = 'complete_profile'
+                        st.success("✅ Phone verified! Let's set up your profile.")
+                        st.rerun()
+                    else:
+                        # Existing user - log them in
+                        user = result['user']
+                        st.session_state.session_token = result['session_token']
+                        st.session_state.user_profile = {
+                            'id': user['id'],
+                            'name': user['name'],
+                            'email': user.get('email', ''),
+                            'age': user.get('age'),
+                            'type': user.get('role', 'patient'),
+                            'phone': user.get('phone', ''),
+                            'relationship': 'family_member'
+                        }
+                        db, _ = init_database()
+                        user_circles = db.get_user_family_circles(user['id'])
+                        st.session_state.onboarding_complete = len(user_circles) > 0
+                        st.session_state.show_login = False
+                        st.session_state.auth_step = 'phone'
+                        st.success(f"✅ Welcome back, {user['name']}!")
+                        st.rerun()
+                else:
+                    st.error(result['error'])
+            else:
+                st.error("Please enter the 6-digit code")
+
+        if back_submitted:
+            st.session_state.auth_step = 'phone'
+            st.rerun()
+
+    # Resend option
+    st.markdown("---")
+    if remaining <= 0 or elapsed > 30:  # Allow resend after 30 seconds
+        if st.button("📲 Resend Code", use_container_width=True):
+            auth = get_auth_service()
+            result = auth.request_otp(phone, purpose='login')
+            if result['success']:
+                st.session_state.otp_sent_time = time.time()
+                st.success("✅ New code sent!")
+                st.rerun()
+            else:
+                st.error(result['error'])
+    else:
+        wait_time = 30 - int(elapsed)
+        st.markdown(f"<p style='text-align:center; color:#666;'>Resend available in {wait_time}s</p>", unsafe_allow_html=True)
+
+
+def show_complete_profile():
+    """Show profile completion form for new users after OTP verification."""
+    st.markdown('<h1 class="welcome-header">👤 Complete Your Profile</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="welcome-subheader">Just a few more details to get started</p>', unsafe_allow_html=True)
+
+    phone = st.session_state.auth_phone
+
+    with st.form("complete_profile_form"):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            name = st.text_input("Full Name *", placeholder="Enter your full name")
+            email = st.text_input("Email (optional)", placeholder="your.email@example.com")
+
+        with col2:
+            age = st.number_input("Age", min_value=1, max_value=120, value=30)
+            user_type = st.selectbox(
+                "I am a:",
+                ["family_member", "patient"],
+                format_func=lambda x: "Family Member (caring for someone)" if x == "family_member" else "Patient (managing my own health)"
+            )
+
+        st.markdown("---")
+        st.markdown("**Optional: Set a password for email login**")
+        st.caption("This allows you to also sign in with email & password")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            password = st.text_input("Password (optional)", type="password", placeholder="At least 8 characters")
+        with col2:
+            confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm password")
+
+        submitted = st.form_submit_button("🎯 Create My Account", use_container_width=True, type="primary")
+
+        if submitted:
+            if name:
+                # Validate password if provided
+                if password:
+                    if password != confirm_password:
+                        st.error("❌ Passwords do not match")
+                        st.stop()
+                    auth = get_auth_service()
+                    is_strong, errors = auth.validate_password_strength(password)
+                    if not is_strong:
+                        st.error(f"❌ {errors[0]}")
+                        st.stop()
+
+                auth = get_auth_service()
+                result = auth.complete_phone_registration(
+                    phone=phone,
+                    name=name,
+                    email=email if email else None,
+                    password=password if password else None,
+                    age=age,
+                    role=user_type
+                )
+
+                if result['success']:
+                    user = result['user']
+                    st.session_state.session_token = result['session_token']
+                    st.session_state.user_profile = {
+                        'id': user['id'],
+                        'name': user['name'],
+                        'email': user.get('email', ''),
+                        'age': user.get('age'),
+                        'type': user.get('role', 'patient'),
+                        'phone': user.get('phone', ''),
+                        'relationship': 'family_member' if user_type == 'family_member' else 'patient'
+                    }
+                    st.session_state.show_login = False
+                    st.session_state.onboarding_complete = False
+                    st.session_state.auth_step = 'phone'
+                    st.session_state.is_new_user = False
+                    st.success(f"✅ Welcome to FamilyCare, {name}!")
+                    st.balloons()
+                    st.rerun()
+                else:
+                    st.error(result['error'])
+            else:
+                st.error("Please enter your name")
+
+    if st.button("← Back"):
+        st.session_state.auth_step = 'phone'
+        st.rerun()
+
+
+def show_email_login():
+    """Show email/password login screen."""
+    st.markdown('<h1 class="welcome-header">🏥 Sign In with Email</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="welcome-subheader">Use your email and password</p>', unsafe_allow_html=True)
+
+    with st.form("email_login_form"):
+        email = st.text_input("Email Address", placeholder="your.email@example.com")
+        password = st.text_input("Password", type="password", placeholder="Enter your password")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            login_submitted = st.form_submit_button("🔑 Sign In", use_container_width=True, type="primary")
+        with col2:
+            back_submitted = st.form_submit_button("← Back to Phone", use_container_width=True)
+
+        if login_submitted:
+            if email and password:
+                auth = get_auth_service()
+                result = auth.login_with_email(email, password)
+
+                if result['success']:
+                    user = result['user']
+                    st.session_state.session_token = result['session_token']
+                    st.session_state.user_profile = {
+                        'id': user['id'],
+                        'name': user['name'],
+                        'email': user.get('email', ''),
+                        'age': user.get('age'),
+                        'type': user.get('role', 'patient'),
+                        'phone': user.get('phone', ''),
+                        'relationship': 'family_member'
+                    }
+                    db, _ = init_database()
+                    user_circles = db.get_user_family_circles(user['id'])
+                    st.session_state.onboarding_complete = len(user_circles) > 0
+                    st.session_state.show_login = False
+                    st.session_state.auth_step = 'phone'
+                    st.success(f"✅ Welcome back, {user['name']}!")
+                    st.rerun()
+                else:
+                    st.error(result['error'])
+            else:
+                st.error("Please enter email and password")
+
+        if back_submitted:
+            st.session_state.auth_step = 'phone'
+            st.rerun()
+
+    st.markdown("---")
+
+    # Forgot password
+    with st.expander("🔑 Forgot Password?"):
+        with st.form("forgot_password_form"):
+            reset_email = st.text_input("Enter your email address", key="reset_email")
+            if st.form_submit_button("Send Reset Link"):
+                if reset_email:
+                    auth = get_auth_service()
+                    result = auth.request_password_reset(reset_email)
+                    st.success(result['message'])
+                else:
+                    st.error("Please enter your email address")
+
+    # Demo options
+    with st.expander("🔧 Demo Options", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("👤 Skip Login (Guest)", type="secondary", key="guest_email"):
+                st.session_state.show_login = False
+                st.session_state.auth_step = 'phone'
+                st.rerun()
+        with col2:
+            if st.button("🗑️ Reset All Data", type="secondary", key="reset_email_page"):
+                db_path = "data/medications.db"
+                if os.path.exists(db_path):
+                    os.remove(db_path)
                     for key in list(st.session_state.keys()):
                         del st.session_state[key]
                     st.success("✅ All data cleared!")
                     st.rerun()
 
 def show_register_screen():
-    """Show registration screen for new users."""
+    """Show registration screen with phone-first approach (Life360 style)."""
     st.markdown('<h1 class="welcome-header">🏥 Join FamilyCare</h1>', unsafe_allow_html=True)
     st.markdown('<p class="welcome-subheader">Create your account to start managing family health</p>', unsafe_allow_html=True)
-    
+
     if st.button("← Back to Sign In"):
         st.session_state.show_register = False
         st.session_state.show_login = True
+        st.session_state.auth_step = 'phone'
         st.rerun()
-    
-    # Registration form
-    with st.form("register_form"):
-        st.markdown("### 📝 Create Your Account")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            name = st.text_input("Full Name *", placeholder="Enter your full name")
-            email = st.text_input("Email Address *", placeholder="your.email@example.com")
-        
-        with col2:
-            age = st.number_input("Age", min_value=1, max_value=120, value=30)
-            phone = st.text_input("Phone Number", placeholder="+1 (555) 123-4567")
-        
-        user_type = st.selectbox("I am a:", ["family_member", "patient"], 
-                                format_func=lambda x: "Family Member (caring for someone)" if x == "family_member" else "Patient (managing my own health)")
-        
-        # Simple password for demo
-        password = st.text_input("Create Password", type="password", placeholder="Choose a secure password")
-        confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm your password")
-        
-        st.markdown("---")
-        
-        register_submitted = st.form_submit_button("🎯 Create My Account", use_container_width=True)
-        
-        if register_submitted:
-            if name and email and password:
-                if password != confirm_password:
-                    st.error("❌ Passwords do not match.")
-                else:
-                    db, family_manager = init_database()
-                    
-                    # Check if email already exists
-                    existing_user = db.get_user_by_email(email)
-                    if existing_user:
-                        st.error(f"❌ An account with email {email} already exists.")
-                        st.info("💡 Try signing in instead, or use a different email address.")
+
+    # Registration options
+    st.markdown("### Choose how to register:")
+
+    tab1, tab2 = st.tabs(["📱 Phone (Recommended)", "📧 Email"])
+
+    with tab1:
+        st.markdown("#### Register with Phone Number")
+        st.caption("Quick and secure - we'll verify with a text message")
+
+        with st.form("register_phone_form"):
+            phone = st.text_input(
+                "Phone Number *",
+                placeholder="+1 (555) 123-4567",
+                help="We'll send a verification code to this number"
+            )
+
+            submitted = st.form_submit_button("📲 Send Verification Code", use_container_width=True, type="primary")
+
+            if submitted:
+                if phone:
+                    auth = get_auth_service()
+                    # Check if phone already registered
+                    db, _ = init_database()
+                    existing = db.get_user_by_phone(auth.normalize_phone(phone))
+                    if existing:
+                        st.error("❌ This phone number is already registered. Try signing in instead.")
                     else:
-                        try:
-                            user_id = db.add_user(name, email, age, user_type, phone)
-                            
+                        result = auth.request_otp(phone, purpose='register')
+                        if result['success']:
+                            st.session_state.auth_phone = result['phone']
+                            st.session_state.otp_sent_time = time.time()
+                            st.session_state.show_register = False
+                            st.session_state.show_login = True
+                            st.session_state.auth_step = 'otp'
+                            st.session_state.is_new_user = True
+                            st.success(result['message'])
+                            st.rerun()
+                        else:
+                            st.error(result['error'])
+                else:
+                    st.error("Please enter your phone number")
+
+    with tab2:
+        st.markdown("#### Register with Email")
+        st.caption("Traditional email and password registration")
+
+        with st.form("register_email_form"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                name = st.text_input("Full Name *", placeholder="Enter your full name", key="reg_name")
+                email = st.text_input("Email Address *", placeholder="your.email@example.com", key="reg_email")
+                password = st.text_input("Password *", type="password", placeholder="At least 8 characters", key="reg_pass")
+
+            with col2:
+                age = st.number_input("Age", min_value=1, max_value=120, value=30, key="reg_age")
+                phone = st.text_input("Phone (optional)", placeholder="+1 (555) 123-4567", key="reg_phone_opt")
+                confirm_password = st.text_input("Confirm Password *", type="password", placeholder="Confirm password", key="reg_confirm")
+
+            user_type = st.selectbox(
+                "I am a:",
+                ["family_member", "patient"],
+                format_func=lambda x: "Family Member (caring for someone)" if x == "family_member" else "Patient (managing my own health)",
+                key="reg_type"
+            )
+
+            st.markdown("---")
+            register_submitted = st.form_submit_button("🎯 Create Account", use_container_width=True, type="primary")
+
+            if register_submitted:
+                if name and email and password:
+                    if password != confirm_password:
+                        st.error("❌ Passwords do not match")
+                    else:
+                        auth = get_auth_service()
+                        result = auth.register_with_email(
+                            email=email,
+                            password=password,
+                            name=name,
+                            phone=phone if phone else None,
+                            age=age,
+                            role=user_type
+                        )
+
+                        if result['success']:
+                            user = result['user']
+                            st.session_state.session_token = result['session_token']
                             st.session_state.user_profile = {
-                                'id': user_id,
-                                'name': name,
-                                'email': email,
-                                'age': age,
-                                'type': user_type,
-                                'phone': phone,
+                                'id': user['id'],
+                                'name': user['name'],
+                                'email': user.get('email', ''),
+                                'age': user.get('age'),
+                                'type': user.get('role', 'patient'),
+                                'phone': user.get('phone', ''),
                                 'relationship': 'family_member' if user_type == 'family_member' else 'patient'
                             }
-                            
                             st.session_state.show_register = False
-                            st.session_state.onboarding_complete = False  # New users need onboarding
+                            st.session_state.onboarding_complete = False
                             st.success(f"✅ Welcome to FamilyCare, {name}!")
                             st.balloons()
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error creating account: {str(e)}")
-            else:
-                st.error("Please fill in all required fields (Name, Email, Password).")
+                        else:
+                            st.error(result['error'])
+                            if result.get('password_errors'):
+                                for err in result['password_errors']:
+                                    st.warning(f"• {err}")
+                else:
+                    st.error("Please fill in all required fields (Name, Email, Password)")
 
 def show_welcome_screen():
     """Show welcome screen for guest mode (no login)."""
@@ -676,6 +1028,153 @@ def show_join_family_circle():
             else:
                 st.error("Please enter an invite code.")
 
+def show_medication_logging():
+    """Show interface for logging today's medications."""
+    db, family_manager = init_database()
+    user = st.session_state.user_profile
+    
+    st.markdown("# 💊 Log Today's Medications")
+    
+    if st.button("← Back to Dashboard"):
+        st.session_state.show_medication_logging = False
+        st.rerun()
+    
+    st.markdown("---")
+    
+    # Get today's schedule
+    if user['type'] == 'patient':
+        patient_id = user['id']
+        patient_name = user['name']
+    else:
+        # For family members, let them choose which patient
+        circles = db.get_user_family_circles(user['id'])
+        if not circles:
+            st.warning("No family circles found.")
+            return
+        
+        # Get all patients from circles
+        patients_status = db.get_family_patients_status(user['id'])
+        if not patients_status:
+            st.info("No patients to log medications for.")
+            return
+        
+        # Select patient
+        patient_names = {p['id']: p['name'] for p in patients_status}
+        selected_patient_id = st.selectbox(
+            "Select Patient:",
+            options=list(patient_names.keys()),
+            format_func=lambda x: patient_names[x]
+        )
+        patient_id = selected_patient_id
+        patient_name = patient_names[patient_id]
+    
+    # Get medications for selected patient
+    medications = db.get_patient_medications(patient_id)
+    
+    if not medications:
+        st.info(f"No medications scheduled for {patient_name}.")
+        return
+    
+    # Display today's schedule
+    st.markdown(f"## 📅 Today's Schedule for {patient_name}")
+    st.markdown(f"**Date:** {datetime.now().strftime('%A, %B %d, %Y')}")
+    
+    today = datetime.now().date().isoformat()
+    
+    for medication in medications:
+        with st.container():
+            st.markdown(f"### 💊 {medication['name']} - {medication['dosage']}")
+            
+            if medication.get('notes'):
+                st.info(f"📝 {medication['notes']}")
+            
+            for med_time in medication['times']:
+                # Check if already logged today
+                with sqlite3.connect(db.db_path) as conn:
+                    cursor = conn.execute("""
+                        SELECT taken, actual_time FROM dose_logs
+                        WHERE patient_id = ? AND medication_name = ? 
+                        AND scheduled_time = ? AND date = ?
+                    """, (patient_id, medication['name'], med_time, today))
+                    existing_log = cursor.fetchone()
+                
+                col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
+                
+                with col1:
+                    st.write(f"⏰ **Scheduled:** {med_time}")
+                
+                with col2:
+                    if existing_log:
+                        if existing_log[0]:
+                            st.success(f"✅ Taken at {existing_log[1]}")
+                        else:
+                            st.error(f"❌ Marked as missed")
+                    else:
+                        current_time = datetime.now().time()
+                        scheduled_time_obj = datetime.strptime(med_time, "%H:%M").time()
+                        
+                        if current_time > scheduled_time_obj:
+                            st.warning("⏳ Overdue")
+                        else:
+                            st.info("⏳ Upcoming")
+                
+                with col3:
+                    if not existing_log:
+                        if st.button(f"✅", key=f"taken_{medication['id']}_{med_time}", help="Mark as taken"):
+                            db.log_dose(
+                                patient_id,
+                                medication['name'],
+                                med_time,
+                                True,
+                                user['id'],
+                                datetime.now().strftime("%H:%M")
+                            )
+                            st.success(f"Logged {medication['name']} as taken!")
+                            st.rerun()
+                
+                with col4:
+                    if not existing_log:
+                        if st.button(f"❌", key=f"missed_{medication['id']}_{med_time}", help="Mark as missed"):
+                            db.log_dose(
+                                patient_id,
+                                medication['name'],
+                                med_time,
+                                False,
+                                user['id'],
+                                datetime.now().strftime("%H:%M")
+                            )
+                            st.warning(f"Logged {medication['name']} as missed.")
+                            st.rerun()
+            
+            st.markdown("---")
+    
+    # Show today's adherence
+    st.markdown("### 📊 Today's Progress")
+    
+    with sqlite3.connect(db.db_path) as conn:
+        cursor = conn.execute("""
+            SELECT COUNT(*) as total, SUM(taken) as taken_count
+            FROM dose_logs
+            WHERE patient_id = ? AND date = ?
+        """, (patient_id, today))
+        result = cursor.fetchone()
+        
+        if result[0] > 0:
+            total = result[0]
+            taken = result[1] if result[1] else 0
+            adherence = (taken / total) * 100
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Doses Today", total)
+            with col2:
+                st.metric("Taken", taken)
+            with col3:
+                color = "🟢" if adherence >= 90 else "🟡" if adherence >= 70 else "🔴"
+                st.metric(f"{color} Today's Adherence", f"{adherence:.0f}%")
+        else:
+            st.info("No doses logged yet today.")
+
 def show_family_dashboard():
     """Display family overview dashboard with user's real data."""
     db, family_manager = init_database()
@@ -817,10 +1316,10 @@ def show_family_dashboard():
                     st.rerun()
             
             with col3:
-                if st.button(f"⏰ Set Reminder", key=f"reminder_{patient['id']}"):
-                    st.success("Reminder feature coming soon!")
+                if st.button(f"📝 Log Doses", key=f"log_{patient['id']}"):
+                    st.session_state['show_medication_logging'] = True
+                    st.rerun()
 
-# Keep existing functions for patient details, add medication, etc.
 def show_patient_details():
     """Show detailed view for a specific patient."""
     if 'selected_patient' not in st.session_state:
@@ -846,9 +1345,27 @@ def show_patient_details():
     # Create adherence chart
     st.markdown("## 📈 7-Day Adherence Trend")
     
-    # Mock adherence data for demonstration
-    dates = [datetime.now().date() - timedelta(days=x) for x in range(6, -1, -1)]
-    adherence_data = [100, 100, 50, 100, 50, 100, 66.7]  # Mock data
+    # Get real adherence data from database
+    with sqlite3.connect(db.db_path) as conn:
+        cursor = conn.execute("""
+            SELECT date, 
+                   COUNT(*) as total,
+                   SUM(taken) as taken
+            FROM dose_logs
+            WHERE patient_id = ? AND date >= date('now', '-7 days')
+            GROUP BY date
+            ORDER BY date
+        """, (patient_id,))
+        
+        logs = cursor.fetchall()
+    
+    if logs:
+        dates = [datetime.fromisoformat(log[0]) for log in logs]
+        adherence_data = [(log[2]/log[1]*100) if log[1] > 0 else 0 for log in logs]
+    else:
+        # Mock data if no logs
+        dates = [datetime.now().date() - timedelta(days=x) for x in range(6, -1, -1)]
+        adherence_data = [0] * 7
     
     fig = px.line(
         x=dates, 
@@ -874,15 +1391,30 @@ def show_patient_details():
     medications = db.get_patient_medications(patient_id)
     
     if medications:
+        today = datetime.now().date().isoformat()
         schedule_data = []
         
         for med in medications:
             for time in med['times']:
+                # Check if logged today
+                with sqlite3.connect(db.db_path) as conn:
+                    cursor = conn.execute("""
+                        SELECT taken FROM dose_logs
+                        WHERE patient_id = ? AND medication_name = ? 
+                        AND scheduled_time = ? AND date = ?
+                    """, (patient_id, med['name'], time, today))
+                    log = cursor.fetchone()
+                
+                if log:
+                    status = '✅ Taken' if log[0] else '❌ Missed'
+                else:
+                    status = '⏳ Pending'
+                
                 schedule_data.append({
                     'Time': time,
                     'Medication': med['name'],
                     'Dosage': med['dosage'],
-                    'Status': '⏳ Pending'  # Real app would check actual logs
+                    'Status': status
                 })
         
         df = pd.DataFrame(schedule_data).sort_values('Time')
@@ -956,6 +1488,7 @@ def show_add_medication():
                     }
                 )
                 st.success(f"✅ Added {medication_name} for {patient['name']}")
+                st.info("💡 Automated reminders will be sent at scheduled times!")
                 st.balloons()
                 
                 # Clear form and return to dashboard
@@ -1004,6 +1537,11 @@ def main():
         show_getting_started()
         return
     
+    # Show medication logging interface
+    if st.session_state.get('show_medication_logging'):
+        show_medication_logging()
+        return
+    
     # Show appropriate main screen
     if 'selected_patient' in st.session_state:
         show_patient_details()
@@ -1023,6 +1561,10 @@ def main():
         st.sidebar.markdown("---")
         st.sidebar.markdown("## 🔗 Quick Actions")
         
+        if st.sidebar.button("📝 Log Medications"):
+            st.session_state.show_medication_logging = True
+            st.rerun()
+        
         if st.sidebar.button("🆕 Create New Circle"):
             st.session_state.show_create_circle = True
             st.rerun()
@@ -1038,10 +1580,17 @@ def main():
         st.sidebar.markdown("## 👤 Account")
         
         if st.sidebar.button("🚪 Sign Out"):
+            # Invalidate session token if exists
+            if st.session_state.get('session_token'):
+                auth = get_auth_service()
+                auth.logout(st.session_state.session_token)
             # Clear user session but keep database
             st.session_state.user_profile = None
+            st.session_state.session_token = None
             st.session_state.onboarding_complete = False
             st.session_state.show_login = True
+            st.session_state.auth_step = 'phone'
+            st.session_state.auth_phone = None
             # Clear other session states
             for key in list(st.session_state.keys()):
                 if key.startswith(('show_', 'selected_', 'add_', 'circle_', 'family_')):
@@ -1055,7 +1604,6 @@ def main():
         # Demo reset for portfolio presentations
         with st.sidebar.expander("🔧 Demo Tools", expanded=False):
             if st.sidebar.button("🔄 Reset App Data", type="secondary"):
-                import os
                 db_path = "data/medications.db"
                 if os.path.exists(db_path):
                     os.remove(db_path)

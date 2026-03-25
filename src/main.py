@@ -1,180 +1,389 @@
 #!/usr/bin/env python3
 """
-Medication Tracker - Family Circle Test
-Test the family circle functionality for multi-user medication management.
+Medication Tracker - Background Service
+Runs automated reminders and weekly reports in the background.
+This should be run alongside the Streamlit web app.
 """
 
-from models.medication import Medication, User
-from models.family import FamilyCircleManager
+import sys
+import os
+import time
+import logging
+from datetime import datetime
+from dotenv import load_dotenv
+
+# Add the current directory to the path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from utils.database import MedicationDB
+from services.scheduler import MedicationScheduler
+from services.notifications import NotificationService
 
-def test_family_circle_functionality():
-    """Test the family circle features."""
-    print("🏠 Testing Family Circle Medication Management\n")
-    
-    # Initialize database
-    print("1. Initializing database with family support...")
-    db = MedicationDB()
-    family_manager = FamilyCircleManager(db)
-    print("   ✅ Database initialized with family circle tables!")
-    
-    # Create users
-    print("\n2. Creating users...")
-    # Elderly patient
-    dorothy_id = db.add_user("Dorothy Johnson", "dorothy@email.com", 75, "patient", "555-0123")
-    
-    # Family members
-    sarah_id = db.add_user("Sarah Johnson", "sarah@email.com", 45, "family_member", "555-0124")
-    mike_id = db.add_user("Mike Johnson", "mike@email.com", 50, "family_member", "555-0125")
-    
-    print(f"   ✅ Created Dorothy Johnson (Patient, ID: {dorothy_id})")
-    print(f"   ✅ Created Sarah Johnson (Daughter, ID: {sarah_id})")
-    print(f"   ✅ Created Mike Johnson (Son-in-law, ID: {mike_id})")
-    
-    # Create family circle
-    print("\n3. Creating family circle...")
-    circle_id, invite_code = family_manager.create_family_circle("Johnson Family Care", sarah_id)
-    print(f"   ✅ Created 'Johnson Family Care' circle")
-    print(f"   📨 Invite code: {invite_code}")
-    
-    # Add family members to circle
-    print("\n4. Adding family members to circle...")
-    
-    # Add Dorothy as patient
-    dorothy_joined = db.join_family_circle(invite_code, dorothy_id, "patient")
-    # Add Mike as family caregiver
-    mike_joined = db.join_family_circle(invite_code, mike_id, "spouse")
-    
-    print(f"   ✅ Dorothy joined circle: {dorothy_joined}")
-    print(f"   ✅ Mike joined circle: {mike_joined}")
-    
-    # Get circle members
-    print("\n5. Family circle members:")
-    members = db.get_family_circle_members(circle_id)
-    for member in members:
-        print(f"   👤 {member['name']} - {member['relationship']} - {member['role']}")
-        print(f"      Permissions: {member['permissions']}")
-    
-    # Sarah (daughter) adds medications for Dorothy
-    print("\n6. Sarah adding medications for Dorothy...")
-    med1_id = family_manager.add_medication_for_patient(
-        family_member_id=sarah_id,
-        patient_id=dorothy_id,
-        medication_data={
-            'name': 'Metformin',
-            'dosage': '500mg',
-            'frequency': 'twice_daily',
-            'times': ['08:00', '20:00'],
-            'notes': 'Take with meals'
-        }
-    )
-    
-    med2_id = family_manager.add_medication_for_patient(
-        family_member_id=sarah_id,
-        patient_id=dorothy_id,
-        medication_data={
-            'name': 'Lisinopril',
-            'dosage': '10mg',
-            'frequency': 'daily',
-            'times': ['08:00'],
-            'notes': 'Blood pressure medication'
-        }
-    )
-    
-    print(f"   ✅ Sarah added Metformin for Dorothy (ID: {med1_id})")
-    print(f"   ✅ Sarah added Lisinopril for Dorothy (ID: {med2_id})")
-    
-    # View Dorothy's medications
-    print("\n7. Dorothy's current medications:")
-    medications = db.get_patient_medications(dorothy_id)
-    for med in medications:
-        print(f"   💊 {med['name']} - {med['dosage']} at {', '.join(med['times'])}")
-        print(f"      Managed by: {med['managed_by_name']}")
-        print(f"      Notes: {med['notes']}")
-    
-    # Log some doses (can be done by family members)
-    print("\n8. Logging medication doses...")
-    db.log_dose(dorothy_id, "Metformin", "08:00", True, dorothy_id)  # Dorothy took morning dose
-    db.log_dose(dorothy_id, "Lisinopril", "08:00", True, dorothy_id)  # Dorothy took BP med
-    db.log_dose(dorothy_id, "Metformin", "20:00", False, sarah_id)  # Sarah marked evening dose missed
-    
-    print("   ✅ Logged morning doses (taken) and evening Metformin (missed)")
-    print("   ℹ️  Family members can help track doses remotely")
-    
-    # Family dashboard view
-    print("\n9. Sarah's family dashboard:")
-    dashboard_data = family_manager.get_family_dashboard_data(sarah_id)
-    
-    print(f"   📊 Monitoring {dashboard_data['total_patients']} patients")
-    print(f"   📈 Average adherence: {dashboard_data['average_adherence']}%")
-    print(f"   ⚠️  Patients needing attention: {dashboard_data['patients_needing_attention']}")
-    
-    print("\n   Patient Status:")
-    for patient in dashboard_data['patients_status']:
-        print(f"   👵 {patient['name']} ({patient['age']} years old)")
-        print(f"      📋 {patient['total_medications']} medications")
-        print(f"      ✅ {patient['adherence_rate']:.1f}% adherence rate")
-    
-    if dashboard_data['alerts']:
-        print("\n   🚨 Alerts:")
-        for alert in dashboard_data['alerts']:
-            print(f"      {alert}")
-    
-    # Mike's view
-    print(f"\n10. Mike's family dashboard:")
-    mike_dashboard = family_manager.get_family_dashboard_data(mike_id)
-    print(f"    📊 Mike can also monitor {mike_dashboard['total_patients']} patients")
-    print(f"    📱 Family members can collaborate on care")
-    
-    print("\n🎉 Family Circle functionality working perfectly!")
-    print("\n💡 Key Features Demonstrated:")
-    print("   • Family members can create care circles")
-    print("   • Multiple people can manage one patient's medications")
-    print("   • Remote monitoring and progress tracking")
-    print("   • Collaborative medication management")
-    print("   • Family dashboard with alerts and insights")
-    
-    print(f"\n📊 Database location: {db.db_path}")
-    print("🚀 Ready to build the user interface!")
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('medication_tracker.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-def test_basic_functionality():
-    """Test basic single-user functionality (original test)."""
-    print("🧪 Testing Basic Medication Tracker Functionality\n")
+def load_environment():
+    """Load environment variables from .env file."""
+    load_dotenv()
+    logger.info("Environment variables loaded")
     
-    # Initialize database
-    print("1. Initializing database...")
+    # Check if critical env variables are set
+    required_vars = ['EMAIL_ADDRESS', 'EMAIL_PASSWORD']
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    
+    if missing_vars:
+        logger.warning(f"Missing environment variables: {', '.join(missing_vars)}")
+        logger.warning("Email notifications may not work. Please configure .env file.")
+    
+    # Check optional Twilio variables
+    twilio_vars = ['TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN', 'TWILIO_PHONE_NUMBER']
+    missing_twilio = [var for var in twilio_vars if not os.getenv(var)]
+    
+    if missing_twilio:
+        logger.warning(f"Twilio not configured: {', '.join(missing_twilio)}")
+        logger.warning("SMS notifications disabled. Email only.")
+
+def test_notifications():
+    """Test the notification system."""
+    logger.info("Testing notification system...")
+    
     db = MedicationDB()
-    print("   ✅ Database initialized successfully!")
+    notification_service = NotificationService()
     
-    # Create a user (old style for backward compatibility)
-    print("\n2. Creating user...")
-    user_id = db.add_user("Dorothy Johnson", age=75)
-    print(f"   ✅ Created user Dorothy Johnson (ID: {user_id})")
+    # Get first user for testing
+    users = db.get_users()
+    if not users:
+        logger.warning("No users found in database. Create a user through the web app first.")
+        return False
     
-    # Add medications (updated method signature)
-    print("\n3. Adding medications...")
-    med1_id = db.add_medication(user_id, user_id, "Metformin", "500mg", "twice_daily", ["08:00", "20:00"])
-    med2_id = db.add_medication(user_id, user_id, "Lisinopril", "10mg", "daily", ["08:00"])
-    print(f"   ✅ Added Metformin (ID: {med1_id})")
-    print(f"   ✅ Added Lisinopril (ID: {med2_id})")
+    test_user = users[0]
     
-    # Get user's medications
-    print("\n4. Retrieving user medications...")
-    medications = db.get_patient_medications(user_id)
-    print(f"   ✅ Found {len(medications)} medications:")
-    for med in medications:
-        print(f"      • {med['name']} - {med['dosage']} at {', '.join(med['times'])}")
+    # Test medication data
+    test_medication = {
+        'name': 'Test Medication',
+        'dosage': '100mg',
+        'times': [datetime.now().strftime("%H:%M")]
+    }
     
-    print("\n✅ Basic functionality still works!")
+    # Try sending test notification
+    logger.info(f"Sending test notification to {test_user['name']} ({test_user['email']})")
+    
+    try:
+        success = notification_service.send_medication_reminder(
+            test_user, 
+            test_medication, 
+            reminder_method='email'
+        )
+        
+        if success:
+            logger.info("✅ Test notification sent successfully!")
+            return True
+        else:
+            logger.error("❌ Failed to send test notification")
+            return False
+    except Exception as e:
+        logger.error(f"❌ Error sending test notification: {str(e)}")
+        return False
+
+def start_scheduler():
+    """Start the background scheduler for automated reminders."""
+    logger.info("Starting Medication Reminder Service...")
+    
+    try:
+        # Initialize database
+        db = MedicationDB()
+        logger.info("Database initialized")
+        
+        # Initialize scheduler
+        scheduler = MedicationScheduler(db)
+        logger.info("Scheduler initialized")
+        
+        # Schedule all existing medications
+        scheduler.schedule_all_medications()
+        
+        # Schedule weekly reports
+        scheduler.schedule_weekly_reports()
+        
+        logger.info("=" * 60)
+        logger.info("🎉 Medication Tracker Background Service Started!")
+        logger.info("=" * 60)
+        logger.info("✅ Automated reminders: ACTIVE")
+        logger.info("✅ Weekly reports: SCHEDULED (Sundays at 6 PM)")
+        logger.info("📝 Monitoring for new medications...")
+        logger.info("=" * 60)
+        
+        # Keep the service running
+        try:
+            while True:
+                time.sleep(60)  # Check every minute for updates
+                
+                # Re-schedule medications periodically (every hour)
+                if datetime.now().minute == 0:
+                    logger.info("Refreshing medication schedules...")
+                    scheduler.schedule_all_medications()
+                
+        except KeyboardInterrupt:
+            logger.info("\n🛑 Shutting down Medication Tracker Service...")
+            scheduler.stop()
+            logger.info("✅ Service stopped gracefully")
+            
+    except Exception as e:
+        logger.error(f"❌ Error starting scheduler: {str(e)}")
+        raise
+
+def show_scheduled_jobs():
+    """Display all currently scheduled reminder jobs."""
+    logger.info("=" * 60)
+    logger.info("📋 SCHEDULED MEDICATION REMINDERS")
+    logger.info("=" * 60)
+    
+    db = MedicationDB()
+    users = db.get_users()
+    
+    if not users:
+        logger.info("No users found in database.")
+        return
+    
+    total_reminders = 0
+    
+    for user in users:
+        if user['role'] == 'patient':
+            medications = db.get_patient_medications(user['id'])
+            
+            if medications:
+                logger.info(f"\n👤 {user['name']} ({user['email']})")
+                logger.info(f"   Phone: {user['phone'] or 'Not provided'}")
+                
+                for med in medications:
+                    logger.info(f"\n   💊 {med['name']} - {med['dosage']}")
+                    for time in med['times']:
+                        logger.info(f"      ⏰ {time} - Daily reminder")
+                        total_reminders += 1
+                    if med.get('notes'):
+                        logger.info(f"      📝 {med['notes']}")
+    
+    logger.info("\n" + "=" * 60)
+    logger.info(f"Total scheduled reminders: {total_reminders}")
+    logger.info("=" * 60)
+
+def run_menu():
+    """Interactive menu for testing and management."""
+    print("\n" + "=" * 60)
+    print("🏥 FAMILYCARE MEDICATION TRACKER - BACKGROUND SERVICE")
+    print("=" * 60)
+    print("\nWhat would you like to do?")
+    print("\n1. 🚀 Start Automated Reminder Service (Production)")
+    print("2. 📋 View Scheduled Reminders")
+    print("3. 🧪 Test Notification System")
+    print("4. 📊 View Database Statistics")
+    print("5. 🔧 Check Environment Configuration")
+    print("6. ❌ Exit")
+    print("\n" + "=" * 60)
+    
+    choice = input("\nEnter your choice (1-6): ").strip()
+    
+    if choice == '1':
+        start_scheduler()
+    
+    elif choice == '2':
+        show_scheduled_jobs()
+        input("\nPress Enter to continue...")
+        run_menu()
+    
+    elif choice == '3':
+        test_notifications()
+        input("\nPress Enter to continue...")
+        run_menu()
+    
+    elif choice == '4':
+        show_database_stats()
+        input("\nPress Enter to continue...")
+        run_menu()
+    
+    elif choice == '5':
+        check_environment()
+        input("\nPress Enter to continue...")
+        run_menu()
+    
+    elif choice == '6':
+        print("\n👋 Goodbye! Stay healthy!")
+        sys.exit(0)
+    
+    else:
+        print("\n❌ Invalid choice. Please try again.")
+        time.sleep(1)
+        run_menu()
+
+def show_database_stats():
+    """Display database statistics."""
+    logger.info("=" * 60)
+    logger.info("📊 DATABASE STATISTICS")
+    logger.info("=" * 60)
+    
+    db = MedicationDB()
+    
+    # Count users
+    users = db.get_users()
+    patients = [u for u in users if u['role'] == 'patient']
+    family_members = [u for u in users if u['role'] == 'family_member']
+    
+    logger.info(f"\n👥 Users:")
+    logger.info(f"   Total: {len(users)}")
+    logger.info(f"   Patients: {len(patients)}")
+    logger.info(f"   Family Members: {len(family_members)}")
+    
+    # Count medications
+    total_medications = 0
+    for user in users:
+        if user['role'] == 'patient':
+            meds = db.get_patient_medications(user['id'])
+            total_medications += len(meds)
+    
+    logger.info(f"\n💊 Medications:")
+    logger.info(f"   Total Active: {total_medications}")
+    
+    # Count dose logs
+    import sqlite3
+    with sqlite3.connect(db.db_path) as conn:
+        cursor = conn.execute("SELECT COUNT(*) FROM dose_logs")
+        total_logs = cursor.fetchone()[0]
+        
+        cursor = conn.execute("SELECT COUNT(*) FROM dose_logs WHERE taken = 1")
+        taken_logs = cursor.fetchone()[0]
+        
+        cursor = conn.execute("SELECT COUNT(*) FROM family_circles")
+        total_circles = cursor.fetchone()[0]
+    
+    logger.info(f"\n📝 Dose Logs:")
+    logger.info(f"   Total: {total_logs}")
+    logger.info(f"   Taken: {taken_logs}")
+    logger.info(f"   Missed: {total_logs - taken_logs}")
+    
+    if total_logs > 0:
+        adherence = (taken_logs / total_logs) * 100
+        logger.info(f"   Overall Adherence: {adherence:.1f}%")
+    
+    logger.info(f"\n👨‍👩‍👧‍👦 Family Circles:")
+    logger.info(f"   Total: {total_circles}")
+    
+    logger.info("\n" + "=" * 60)
+
+def check_environment():
+    """Check environment configuration."""
+    logger.info("=" * 60)
+    logger.info("🔧 ENVIRONMENT CONFIGURATION")
+    logger.info("=" * 60)
+    
+    # Check .env file exists
+    if os.path.exists('.env'):
+        logger.info("\n✅ .env file found")
+    else:
+        logger.error("\n❌ .env file NOT found")
+        logger.info("Create a .env file in the project root with your credentials")
+    
+    # Check email configuration
+    logger.info("\n📧 Email Configuration:")
+    email_vars = {
+        'EMAIL_ADDRESS': os.getenv('EMAIL_ADDRESS'),
+        'EMAIL_PASSWORD': os.getenv('EMAIL_PASSWORD'),
+        'SMTP_SERVER': os.getenv('SMTP_SERVER', 'smtp.gmail.com'),
+        'SMTP_PORT': os.getenv('SMTP_PORT', '587')
+    }
+    
+    for var, value in email_vars.items():
+        if value:
+            if 'PASSWORD' in var:
+                logger.info(f"   ✅ {var}: ****** (hidden)")
+            else:
+                logger.info(f"   ✅ {var}: {value}")
+        else:
+            logger.error(f"   ❌ {var}: Not set")
+    
+    # Check Twilio configuration
+    logger.info("\n📱 SMS Configuration (Twilio):")
+    twilio_vars = {
+        'TWILIO_ACCOUNT_SID': os.getenv('TWILIO_ACCOUNT_SID'),
+        'TWILIO_AUTH_TOKEN': os.getenv('TWILIO_AUTH_TOKEN'),
+        'TWILIO_PHONE_NUMBER': os.getenv('TWILIO_PHONE_NUMBER')
+    }
+    
+    for var, value in twilio_vars.items():
+        if value:
+            if 'TOKEN' in var:
+                logger.info(f"   ✅ {var}: ****** (hidden)")
+            else:
+                logger.info(f"   ✅ {var}: {value}")
+        else:
+            logger.warning(f"   ⚠️  {var}: Not set (SMS disabled)")
+    
+    # Database check
+    logger.info("\n💾 Database:")
+    db_path = "data/medications.db"
+    if os.path.exists(db_path):
+        size = os.path.getsize(db_path) / 1024  # KB
+        logger.info(f"   ✅ Database exists: {db_path}")
+        logger.info(f"   Size: {size:.2f} KB")
+    else:
+        logger.warning(f"   ⚠️  Database not found (will be created on first use)")
+    
+    logger.info("\n" + "=" * 60)
+
+def quick_start_guide():
+    """Display quick start guide."""
+    print("\n" + "=" * 60)
+    print("📖 QUICK START GUIDE")
+    print("=" * 60)
+    print("""
+This background service handles automated medication reminders
+and weekly compliance reports.
+
+SETUP STEPS:
+1. Configure your .env file with email/SMS credentials
+2. Create users and medications through the web app
+3. Run this service to enable automated reminders
+
+RUNNING THE SERVICE:
+• Option 1: python src/main.py (interactive menu)
+• Option 2: python src/main.py --start (direct start)
+
+CREDENTIALS NEEDED:
+• Email: Gmail address and App Password
+• SMS (optional): Twilio account credentials
+
+For detailed setup instructions, see the README file.
+    """)
+    print("=" * 60 + "\n")
 
 if __name__ == "__main__":
-    print("Choose test mode:")
-    print("1. Basic functionality (original)")
-    print("2. Family circle functionality (new)")
+    # Load environment variables
+    load_environment()
     
-    choice = input("Enter choice (1 or 2): ").strip()
-    
-    if choice == "1":
-        test_basic_functionality()
+    # Check command line arguments
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '--start':
+            # Direct start without menu
+            start_scheduler()
+        elif sys.argv[1] == '--test':
+            # Test notifications
+            test_notifications()
+        elif sys.argv[1] == '--stats':
+            # Show stats
+            show_database_stats()
+        elif sys.argv[1] == '--help':
+            # Show help
+            quick_start_guide()
+        else:
+            print(f"Unknown argument: {sys.argv[1]}")
+            print("Usage: python main.py [--start|--test|--stats|--help]")
     else:
-        test_family_circle_functionality()
+        # Show interactive menu
+        quick_start_guide()
+        run_menu()
