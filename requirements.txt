@@ -5,7 +5,8 @@ streamlit>=1.28.0
 pandas>=2.0.0
 plotly>=5.0.0
 
-# Database (SQLite built-in, no package needed)
+# Database (using Supabase)
+supabase>=2.0.0
 
 # Scheduling
 APScheduler>=3.10.0

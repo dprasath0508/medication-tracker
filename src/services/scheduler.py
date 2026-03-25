@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import logging
 from typing import Dict, List
 import json
+import sqlite3
 
 from services.notifications import NotificationService
 from utils.database import MedicationDB
@@ -120,7 +121,7 @@ class MedicationScheduler:
         start_date = end_date - timedelta(days=7)
         
         # Query database for dose logs
-        with self.db.db_path as conn:
+        with sqlite3.connect(self.db.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT date, taken, medication_name

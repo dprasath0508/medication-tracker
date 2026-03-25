@@ -17,7 +17,7 @@ import time
 # Add the current directory to the path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from utils.database import MedicationDB
+from utils.db_factory import get_database
 from models.family import FamilyCircleManager
 from services.auth import AuthService
 from services.notifications import NotificationService
@@ -223,7 +223,7 @@ st.markdown("""
 def init_database():
     """Initialize database, family manager, and auth service."""
     if 'db' not in st.session_state:
-        st.session_state.db = MedicationDB()
+        st.session_state.db = get_database()
         st.session_state.family_manager = FamilyCircleManager(st.session_state.db)
         st.session_state.notification_service = NotificationService()
         st.session_state.auth_service = AuthService(

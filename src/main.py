@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 # Add the current directory to the path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from utils.database import MedicationDB
+from utils.db_factory import get_database
 from services.scheduler import MedicationScheduler
 from services.notifications import NotificationService
 
@@ -55,7 +55,7 @@ def test_notifications():
     """Test the notification system."""
     logger.info("Testing notification system...")
     
-    db = MedicationDB()
+    db = get_database()
     notification_service = NotificationService()
     
     # Get first user for testing
@@ -99,7 +99,7 @@ def start_scheduler():
     
     try:
         # Initialize database
-        db = MedicationDB()
+        db = get_database()
         logger.info("Database initialized")
         
         # Initialize scheduler
@@ -145,7 +145,7 @@ def show_scheduled_jobs():
     logger.info("📋 SCHEDULED MEDICATION REMINDERS")
     logger.info("=" * 60)
     
-    db = MedicationDB()
+    db = get_database()
     users = db.get_users()
     
     if not users:
@@ -228,7 +228,7 @@ def show_database_stats():
     logger.info("📊 DATABASE STATISTICS")
     logger.info("=" * 60)
     
-    db = MedicationDB()
+    db = get_database()
     
     # Count users
     users = db.get_users()
