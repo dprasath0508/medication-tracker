@@ -1,5 +1,13 @@
--- Supabase Schema for Medication Tracker
--- Run this in Supabase SQL Editor (Dashboard > SQL Editor > New Query)
+-- =============================================================================
+-- MEDSYNC - Supabase Database Schema
+-- =============================================================================
+-- Run this in Supabase SQL Editor:
+-- 1. Go to your Supabase Dashboard
+-- 2. Click "SQL Editor" in the left sidebar
+-- 3. Click "New Query"
+-- 4. Paste this entire file
+-- 5. Click "Run"
+-- =============================================================================
 
 -- Users table
 CREATE TABLE IF NOT EXISTS users (
@@ -150,9 +158,20 @@ CREATE INDEX IF NOT EXISTS idx_dose_logs_patient_date ON dose_logs(patient_id, d
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON user_sessions(session_token);
 CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_verifications(phone);
 
--- Enable Row Level Security (optional but recommended)
+-- =============================================================================
+-- ENABLE ROW LEVEL SECURITY ON ALL TABLES
+-- =============================================================================
+-- Note: RLS is enabled but no policies are added yet.
+-- You will need to add policies based on your authentication strategy.
+
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE medications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dose_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE family_circles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE family_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reminders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_credentials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE otp_verifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invite_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE login_attempts ENABLE ROW LEVEL SECURITY;
