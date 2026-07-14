@@ -136,11 +136,9 @@ _THEME_TOKENS = {
 }
 
 
-_GLOBAL_CSS = """
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
+_GLOBAL_CSS = """<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Instrument+Sans:wght@400;500;600;700&display=swap');
+
 :root {
     --font-heading: 'Fraunces', 'Iowan Old Style', Georgia, serif;
     --font-body: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -190,6 +188,11 @@ html, body, .stApp, [class*="css"] {
 
 .stApp {
     background: var(--surface-page);
+    background-image:
+        radial-gradient(circle at 15% -10%, color-mix(in oklab, var(--accent) 12%, transparent) 0%, transparent 55%),
+        radial-gradient(circle at 90% 8%,  color-mix(in oklab, var(--accent) 8%,  transparent) 0%, transparent 45%),
+        radial-gradient(circle at 50% 105%, color-mix(in oklab, var(--accent) 6%,  transparent) 0%, transparent 45%);
+    background-attachment: fixed;
     transition: background-color var(--dur-slow) var(--ease-standard),
                 color var(--dur-slow) var(--ease-standard);
 }
@@ -200,6 +203,38 @@ html, body, .stApp, [class*="css"] {
     padding-bottom: var(--space-8);
     max-width: 960px;
 }
+
+/* Decorative blobs floating in the page background — pure decoration, aria-hidden implied by pseudo. */
+.stApp::before, .stApp::after {
+    content: "";
+    position: fixed;
+    pointer-events: none;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.35;
+    z-index: 0;
+}
+.stApp::before {
+    width: 480px; height: 480px;
+    top: -120px; left: -140px;
+    background: var(--accent);
+    animation: blobFloat 24s var(--ease-in-out) infinite;
+}
+.stApp::after {
+    width: 380px; height: 380px;
+    bottom: -100px; right: -100px;
+    background: color-mix(in oklab, var(--accent) 60%, var(--success));
+    animation: blobFloat 32s var(--ease-in-out) infinite reverse;
+}
+@keyframes blobFloat {
+    0%, 100% { transform: translate(0, 0) scale(1); }
+    50%      { transform: translate(40px, 20px) scale(1.1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .stApp::before, .stApp::after { animation: none; }
+}
+/* Keep app content above decorative blobs */
+[data-testid="stMain"], section[data-testid="stSidebar"] { position: relative; z-index: 1; }
 
 /* Typography */
 h1, h2, h3, h4 {

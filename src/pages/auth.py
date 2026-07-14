@@ -52,59 +52,77 @@ def show_login_screen():
 
 
 def show_phone_login():
-    """Show phone number login screen (Life360 style)."""
+    """Show phone number login screen — warm, semi-formal welcome."""
+    from ui.primitives import page_shell, divider
+
+    # Warm welcome hero
     st.markdown(
-        '<h1 class="welcome-header"> Welcome to FamilyCare</h1>', unsafe_allow_html=True
-    )
-    st.markdown(
-        '<p class="welcome-subheader">Keep your loved ones healthy and connected</p>',
+        """
+        <div class="page-fade" style="text-align: center; padding: var(--space-6) 0 var(--space-4) 0;">
+          <p class="eyebrow" style="color: var(--accent);">Welcome</p>
+          <h1 class="hero-heading" style="text-align: center;">Care, together.</h1>
+          <p class="muted" style="font-size: 1.125rem; max-width: 480px; margin: var(--space-3) auto 0;">
+            A gentler way to keep track of medications with the people you love.
+          </p>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
-    st.markdown("### Sign in with your phone number")
-
-    with st.form("phone_login_form"):
-        phone = st.text_input(
-            "Phone Number",
-            placeholder="+1 (555) 123-4567",
-            help="We'll send you a verification code",
-        )
-
-        submitted = st.form_submit_button(
-            "Continue with Phone", use_container_width=True, type="primary"
-        )
-
-        if submitted:
-            if phone:
-                auth = get_auth_service()
-                result = auth.request_otp(phone, purpose="login")
-
-                if result["success"]:
-                    st.session_state.auth_phone = result["phone"]
-                    st.session_state.otp_sent_time = time.time()
-                    st.session_state.auth_step = "otp"
-                    st.success(result["message"])
-                    st.rerun()
-                else:
-                    st.error(result["error"])
-            else:
-                st.error("Please enter your phone number")
-
-    st.markdown("---")
+    # Sign-in card
     st.markdown(
-        '<p style="text-align: center; color: var(--text-muted);">or</p>', unsafe_allow_html=True
+        """
+        <div class="med-card page-fade" style="max-width: 520px; margin: var(--space-6) auto var(--space-5);">
+          <p class="eyebrow">Sign in</p>
+          <h2 style="margin-bottom: var(--space-2);">Continue with your phone</h2>
+          <p class="muted" style="margin: 0 0 var(--space-5) 0;">We'll text you a six-digit code. No password to remember.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Use Email Instead", use_container_width=True):
-            st.session_state.auth_step = "email_login"
-            st.rerun()
-    with col2:
-        if st.button("Create Account", use_container_width=True):
-            st.session_state.show_login = False
-            st.session_state.show_register = True
-            st.rerun()
+    # Centered form column
+    _, form_col, _ = st.columns([1, 3, 1])
+    with form_col:
+        with st.form("phone_login_form"):
+            phone = st.text_input(
+                "Phone number",
+                placeholder="+1 (555) 123-4567",
+                help="We'll send you a verification code",
+            )
+            submitted = st.form_submit_button(
+                "Send me a code", use_container_width=True, type="primary"
+            )
+            if submitted:
+                if phone:
+                    auth = get_auth_service()
+                    result = auth.request_otp(phone, purpose="login")
+                    if result["success"]:
+                        st.session_state.auth_phone = result["phone"]
+                        st.session_state.otp_sent_time = time.time()
+                        st.session_state.auth_step = "otp"
+                        st.success(result["message"])
+                        st.rerun()
+                    else:
+                        st.error(result["error"])
+                else:
+                    st.error("Please enter your phone number")
+
+        divider(4)
+        st.markdown(
+            '<p style="text-align: center; color: var(--text-subtle); font-size: 0.9375rem;">or</p>',
+            unsafe_allow_html=True,
+        )
+        alt_cols = st.columns(2)
+        with alt_cols[0]:
+            if st.button("Use email instead", use_container_width=True, key="alt_email"):
+                st.session_state.auth_step = "email_login"
+                st.rerun()
+        with alt_cols[1]:
+            if st.button("Create an account", use_container_width=True, key="alt_create"):
+                st.session_state.show_login = False
+                st.session_state.show_register = True
+                st.rerun()
 
             # Demo options
     st.markdown("---")
@@ -438,29 +456,39 @@ def show_email_login():
 
 
 def show_register_screen():
-    """Show registration screen with phone-first approach (Life360 style)."""
+    """Show registration screen — warm, semi-formal."""
     st.markdown(
-        '<h1 class="welcome-header"> Join FamilyCare</h1>', unsafe_allow_html=True
-    )
-    st.markdown(
-        '<p class="welcome-subheader">Create your account to start managing family health</p>',
+        """
+        <div class="page-fade" style="text-align: center; padding: var(--space-6) 0 var(--space-4) 0;">
+          <p class="eyebrow" style="color: var(--accent);">Create an account</p>
+          <h1 class="hero-heading" style="text-align: center;">Nice to meet you.</h1>
+          <p class="muted" style="font-size: 1.125rem; max-width: 480px; margin: var(--space-3) auto 0;">
+            Start managing meds together in about a minute.
+          </p>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
-    if st.button("← Back to Sign In"):
-        st.session_state.show_register = False
-        st.session_state.show_login = True
-        st.session_state.auth_step = "phone"
-        st.rerun()
+    _, back_col, _ = st.columns([1, 3, 1])
+    with back_col:
+        if st.button("Back to sign in", key="reg_back"):
+            st.session_state.show_register = False
+            st.session_state.show_login = True
+            st.session_state.auth_step = "phone"
+            st.rerun()
 
-        # Registration options
-    st.markdown("### Choose how to register:")
-
-    tab1, tab2 = st.tabs(["Phone (Recommended)", "Email"])
+    _, tab_col, _ = st.columns([1, 3, 1])
+    with tab_col:
+        tab1, tab2 = st.tabs(["Phone (recommended)", "Email"])
 
     with tab1:
-        st.markdown("#### Register with Phone Number")
-        st.caption("Quick and secure - we'll verify with a text message")
+        st.markdown(
+            '<h3 style="margin-top: var(--space-5);">Register with your phone</h3>'
+            '<p class="muted" style="margin-bottom: var(--space-4);">Quick and secure — '
+            'we\'ll verify with a text message.</p>',
+            unsafe_allow_html=True,
+        )
 
         with st.form("register_phone_form"):
             phone = st.text_input(
