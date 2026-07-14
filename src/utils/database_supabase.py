@@ -201,6 +201,18 @@ class MedicationDB:
         result = self.client.table('dose_logs').insert(data).execute()
         return result.data[0]['id']
 
+    def get_dose_log_for_date(self, patient_id: int, medication_name: str,
+                              scheduled_time: str, date: str):
+        """Return (taken, actual_time) tuple for a scheduled dose on a date, or None."""
+        result = self.client.table('dose_logs').select('taken, actual_time').eq(
+            'patient_id', patient_id
+        ).eq('medication_name', medication_name).eq(
+            'scheduled_time', scheduled_time
+        ).eq('date', date).execute()
+        if result.data:
+            return (result.data[0]['taken'], result.data[0]['actual_time'])
+        return None
+
     # FAMILY DASHBOARD QUERIES
     def get_family_patients_status(self, family_member_id: int) -> List[Dict[str, Any]]:
         """Get medication status for all patients in family member's circles."""

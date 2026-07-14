@@ -22,6 +22,7 @@ from utils.session import (
     family_manager as _family_manager,
     current_user,
     init_session_state,
+    cached_user_family_circles,
 )
 
 
@@ -44,7 +45,7 @@ def render() -> None:
     if user["type"] == "patient":
         _render_patient_shortcut()
 
-    circles = db.get_user_family_circles(user["id"])
+    circles = cached_user_family_circles(user["id"])
 
     if not circles:
         empty_state(

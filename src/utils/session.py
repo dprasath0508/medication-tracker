@@ -92,4 +92,47 @@ def sign_out() -> None:
         if key in {"theme"}:
             continue
         del st.session_state[key]
+    invalidate_read_caches()
     init_session_state()
+
+
+# ---------------------------------------------------------------------------
+# Cached reads
+#
+# Wraps the hottest DB reads with @st.cache_data. Callers should call
+# ``invalidate_read_caches()`` after any mutation (log_dose, add_medication,
+# add_patient, ...) so the next read sees fresh data.
+# ---------------------------------------------------------------------------
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def cached_patient_medications(patient_id: int):
+    return _db_singleton().get_patient_medications(patient_id)
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def cached_dose_log(patient_id: int, medication_name: str, scheduled_time: str, date: str):
+    try:
+        return _db_singleton().get_dose_log_for_date(
+            patient_id, medication_name, scheduled_time, date
+        )
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def cached_family_patients_status(family_member_id: int):
+    return _db_singleton().get_family_patients_status(family_member_id)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_user_family_circles(user_id: int):
+    return _db_singleton().get_user_family_circles(user_id)
+
+
+def invalidate_read_caches() -> None:
+    """Clear all cached reads. Call after any DB mutation."""
+    cached_patient_medications.clear()
+    cached_dose_log.clear()
+    cached_family_patients_status.clear()
+    cached_user_family_circles.clear()

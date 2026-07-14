@@ -6,7 +6,6 @@ for the per-page override that governs this file.
 
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timedelta
 
 import streamlit as st
@@ -20,7 +19,15 @@ from ui.primitives import (
     stack_open,
     stack_close,
 )
-from utils.session import db as _db, current_user, init_session_state
+from utils.session import (
+    db as _db,
+    current_user,
+    init_session_state,
+    cached_patient_medications,
+    cached_dose_log,
+    cached_family_patients_status,
+    invalidate_read_caches,
+)
 
 
 def render() -> None:
@@ -49,7 +56,7 @@ def render() -> None:
             eyebrow=f"{today_str} · {patient_name}",
         )
 
-    medications = db.get_patient_medications(patient_id)
+    medications = cached_patient_medications(patient_id)
 
     if not medications:
         empty_state(
@@ -158,27 +165,8 @@ def _build_doses(db, patient_id: int, medications: list[dict]) -> list[dict]:
 
 
 def _lookup_dose_log(db, patient_id: int, med_name: str, scheduled: str, date: str):
-    """Return (taken, actual_time) tuple or None. Handles both DB backends."""
-    try:
-        if hasattr(db, "db_path") and db.db_path:
-            with sqlite3.connect(db.db_path) as conn:
-                cur = conn.execute(
-                    "SELECT taken, actual_time FROM dose_logs "
-                    "WHERE patient_id=? AND medication_name=? "
-                    "AND scheduled_time=? AND date=?",
-                    (patient_id, med_name, scheduled, date),
-                )
-                return cur.fetchone()
-        result = db.client.table("dose_logs").select("taken, actual_time").eq(
-            "patient_id", patient_id
-        ).eq("medication_name", med_name).eq(
-            "scheduled_time", scheduled
-        ).eq("date", date).execute()
-        if result.data:
-            return (result.data[0]["taken"], result.data[0]["actual_time"])
-        return None
-    except Exception:
-        return None
+    """Cached (taken, actual_time) tuple or None. Cache invalidates on log_dose."""
+    return cached_dose_log(patient_id, med_name, scheduled, date)
 
 
 def _render_dose_card(db, user, patient_id: int, dose: dict) -> None:
@@ -255,6 +243,7 @@ def _render_dose_card(db, user, patient_id: int, dose: dict) -> None:
                     user["id"],
                     datetime.now().strftime("%H:%M"),
                 )
+                invalidate_read_caches()
                 st.rerun()
         with cols[1]:
             if st.button(

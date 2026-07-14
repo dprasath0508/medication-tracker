@@ -336,14 +336,30 @@ class MedicationDB:
         actual_time = actual_time or datetime.now().strftime("%H:%M")
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                """INSERT INTO dose_logs 
-                   (patient_id, medication_name, scheduled_time, taken, actual_time, date, timestamp, logged_by) 
+                """INSERT INTO dose_logs
+                   (patient_id, medication_name, scheduled_time, taken, actual_time, date, timestamp, logged_by)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (patient_id, medication_name, scheduled_time, taken, actual_time, 
+                (patient_id, medication_name, scheduled_time, taken, actual_time,
                  datetime.now().date().isoformat(), datetime.now().isoformat(), logged_by)
             )
             return cursor.lastrowid
-    
+
+    def get_dose_log_for_date(self, patient_id: int, medication_name: str,
+                              scheduled_time: str, date: str):
+        """Return the (taken, actual_time) tuple for a single scheduled dose on a date, or None.
+
+        Callers (today's-meds screen) previously ran this SQL inline. Kept as a
+        method here so the SQLite/Supabase backends can share a single caller.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """SELECT taken, actual_time FROM dose_logs
+                   WHERE patient_id = ? AND medication_name = ?
+                   AND scheduled_time = ? AND date = ?""",
+                (patient_id, medication_name, scheduled_time, date),
+            )
+            return cursor.fetchone()
+
     # FAMILY DASHBOARD QUERIES
     def get_family_patients_status(self, family_member_id: int) -> List[Dict[str, Any]]:
         """Get medication status for all patients in family member's circles."""
