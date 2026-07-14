@@ -225,3 +225,6 @@ Thumbs.db
 
 # Data directory
 data/
+# But keep vendored skill data (e.g. .claude/skills/*/data/)
+!.claude/**/data/
+!.claude/**/data/**
