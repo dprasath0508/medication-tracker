@@ -198,6 +198,8 @@ class MedicationDB:
             self._add_column_if_not_exists(conn, 'users', 'primary_auth_method', "TEXT DEFAULT 'phone'")
             self._add_column_if_not_exists(conn, 'users', 'account_status', "TEXT DEFAULT 'active'")
             self._add_column_if_not_exists(conn, 'users', 'last_login', 'TEXT')
+            # UI preference: which theme the user picked in Settings.
+            self._add_column_if_not_exists(conn, 'users', 'theme', "TEXT DEFAULT 'warm-cream'")
 
     def _add_column_if_not_exists(self, conn, table: str, column: str, column_type: str):
         """Safely add a column to a table if it doesn't exist."""

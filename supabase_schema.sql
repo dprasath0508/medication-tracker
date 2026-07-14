@@ -21,8 +21,12 @@ CREATE TABLE IF NOT EXISTS users (
     phone_verified BOOLEAN DEFAULT FALSE,
     primary_auth_method TEXT DEFAULT 'phone',
     account_status TEXT DEFAULT 'active',
-    last_login TIMESTAMPTZ
+    last_login TIMESTAMPTZ,
+    theme TEXT DEFAULT 'warm-cream'
 );
+
+-- Idempotent migration for pre-existing deployments (safe to re-run).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT DEFAULT 'warm-cream';
 
 -- Family circles table
 CREATE TABLE IF NOT EXISTS family_circles (
