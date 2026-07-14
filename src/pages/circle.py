@@ -36,9 +36,15 @@ def get_auth_service():
 
 def show_create_family_circle():
     """Show family circle creation form."""
-    st.markdown("# Create Your Family Circle")
+    from ui.primitives import page_shell
 
-    if st.button("← Back"):
+    page_shell(
+        "Create a family circle",
+        eyebrow="Family circle",
+        subtitle="A circle links caregivers to patients so everyone sees the same schedule.",
+    )
+
+    if st.button("Back", key="circle_create_back"):
         st.session_state.show_create_circle = False
         st.rerun()
 
@@ -165,13 +171,17 @@ def show_circle_created_success():
 
 def show_join_family_circle():
     """Show join family circle form."""
-    st.markdown("# Join a Family Circle")
+    from ui.primitives import page_shell
 
-    if st.button("← Back"):
+    page_shell(
+        "Join a family circle",
+        eyebrow="Family circle",
+        subtitle="Enter the invite code someone shared with you.",
+    )
+
+    if st.button("Back", key="circle_join_back"):
         st.session_state.show_join_circle = False
         st.rerun()
-
-    st.markdown("Enter the invite code shared by your family member:")
 
     with st.form("join_family_circle"):
         invite_code = st.text_input(

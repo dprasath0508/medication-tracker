@@ -435,6 +435,104 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
     justify-content: center;
     padding: var(--space-5) 0;
 }
+
+/* Legacy class compatibility layer.
+   Kept until every screen has been rewritten to use the primitives.
+   All rules re-express old class names in terms of the new tokens. */
+.main-header {
+    font-family: var(--font-heading);
+    font-size: 2rem;
+    color: var(--text-strong);
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    margin-bottom: var(--space-2);
+}
+.welcome-header {
+    font-family: var(--font-heading);
+    font-size: 2.5rem;
+    line-height: 1.1;
+    color: var(--text-strong);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    margin-bottom: var(--space-2);
+    font-optical-sizing: auto;
+}
+.welcome-subheader {
+    font-family: var(--font-body);
+    font-size: 1.125rem;
+    color: var(--text-muted);
+    margin-bottom: var(--space-6);
+    font-weight: 400;
+}
+.feature-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-6);
+    margin: var(--space-3) 0;
+    box-shadow: var(--shadow-1);
+    transition: border-color var(--dur-base) var(--ease-standard),
+                box-shadow var(--dur-base) var(--ease-standard);
+}
+.feature-card:hover {
+    border-color: var(--border-strong);
+    box-shadow: var(--shadow-2);
+}
+.empty-state {
+    text-align: center;
+    padding: var(--space-7) var(--space-5);
+    background: var(--surface-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    margin: var(--space-5) 0;
+}
+.empty-state h3 {
+    font-family: var(--font-heading);
+    font-size: 1.375rem;
+    color: var(--text-strong);
+    margin: 0 0 var(--space-2) 0;
+}
+.empty-state p {
+    color: var(--text-muted);
+    font-size: 1.0625rem;
+    margin: 0;
+}
+.alert-warning {
+    background: var(--warning-subtle);
+    color: var(--warning);
+    border: 1px solid color-mix(in oklab, var(--warning) 25%, transparent);
+    border-radius: var(--radius-sm);
+    padding: var(--space-4) var(--space-5);
+    margin: var(--space-3) 0;
+    font-family: var(--font-body);
+}
+.alert-success {
+    background: var(--success-subtle);
+    color: var(--success);
+    border: 1px solid color-mix(in oklab, var(--success) 25%, transparent);
+    border-radius: var(--radius-sm);
+    padding: var(--space-4) var(--space-5);
+    margin: var(--space-3) 0;
+    font-family: var(--font-body);
+}
+.success-message {
+    background: var(--success-subtle);
+    color: var(--success);
+    border: 1px solid color-mix(in oklab, var(--success) 25%, transparent);
+    border-radius: var(--radius-md);
+    padding: var(--space-5);
+    margin: var(--space-5) 0;
+    font-weight: 500;
+    font-family: var(--font-body);
+}
+.med-log-card {
+    background: var(--surface-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-5);
+    margin: var(--space-3) 0;
+    box-shadow: var(--shadow-1);
+}
 </style>
 """
 

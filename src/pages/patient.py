@@ -50,11 +50,20 @@ def show_patient_details():
         st.error("Patient not found")
         return
 
-    st.markdown(f"# {patient['name']} - Detailed View")
+    from ui.primitives import page_shell
+    page_shell(
+        patient["name"],
+        eyebrow="Patient",
+        subtitle=f"Age {patient.get('age', '—')} · {patient.get('role', '').title()}",
+    )
 
-    if st.button("← Back to Dashboard"):
+    if st.button("Back to dashboard", key="patient_back"):
         del st.session_state["selected_patient"]
-        st.rerun()
+        st.query_params.clear()
+        if hasattr(st, "switch_page"):
+            st.switch_page("pages/dashboard.py")
+        else:
+            st.rerun()
 
         # Create adherence chart
     st.markdown("## 7-Day Adherence Trend")

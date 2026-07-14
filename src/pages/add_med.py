@@ -50,11 +50,20 @@ def show_add_medication():
         st.error("Patient not found")
         return
 
-    st.markdown(f"# Add Medication for {patient['name']}")
+    from ui.primitives import page_shell
+    page_shell(
+        "Add a medication",
+        eyebrow=f"For {patient['name']}",
+        subtitle="Name, dose, and when to take it. Notes are optional.",
+    )
 
-    if st.button("← Back to Dashboard"):
+    if st.button("Back to dashboard", key="addmed_back"):
         del st.session_state["add_medication_for"]
-        st.rerun()
+        st.query_params.clear()
+        if hasattr(st, "switch_page"):
+            st.switch_page("pages/dashboard.py")
+        else:
+            st.rerun()
 
     with st.form("add_medication_form"):
         col1, col2 = st.columns(2)

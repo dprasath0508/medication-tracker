@@ -1,267 +1,208 @@
-"""Dashboard page — split from the original monolithic web_app.py.
+"""/dashboard — family caregiver overview.
 
-Behaviour is preserved verbatim from the pre-modernization app. The visual
-redesign against ``design-system/MASTER.md`` happens in Commit 4.
+Family members see patients they monitor, average adherence, alerts.
+Patients see their circles and a shortcut to today's meds.
 """
 
 from __future__ import annotations
 
-import sqlite3
-import time
-from datetime import datetime, timedelta
-
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 
-from models.family import FamilyCircleManager
-from services.auth import AuthService
-from services.notifications import NotificationService
-from utils.session import (
-    db as _db, family_manager as _family_manager,
-    auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+from ui.icons import icon
+from ui.primitives import (
+    page_shell,
+    empty_state,
+    status_pill,
+    divider,
+    stack_open,
+    stack_close,
 )
-
-
-def init_database():
-    """Compatibility shim — the legacy screens call this expecting (db, family_manager)."""
-    return _db(), _family_manager()
-
-
-def get_auth_service():
-    return _auth_service()
-
-
-def show_family_dashboard():
-    """Display family overview dashboard with user's real data."""
-    db, family_manager = init_database()
-    user = st.session_state.user_profile
-
-    st.markdown('<h1 class="main-header">Dashboard</h1>', unsafe_allow_html=True)
-    st.markdown(
-        f'<p class="welcome-subheader">Welcome back, {user["name"]}</p>',
-        unsafe_allow_html=True,
-    )
-
-    if user["type"] == "patient":
-        st.markdown(
-            """
-        <style>
-            .todays-meds-card {
-                background: var(--surface);
-                border: 1px solid var(--border);
-                border-radius: 8px;
-                padding: 1.5rem;
-                margin-bottom: 1.5rem;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            }
-            .todays-meds-title {
-                color: var(--text);
-                font-size: 1rem;
-                font-weight: 600;
-                margin: 0 0 0.25rem 0;
-                letter-spacing: -0.01em;
-            }
-            .todays-meds-subtitle {
-                color: var(--text-muted);
-                font-size: 0.875rem;
-                margin: 0;
-            }
-        </style>
-        """,
-            unsafe_allow_html=True,
-        )
-
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.markdown(
-                """
-            <div class="todays-meds-card">
-                <div>
-                    <p class="todays-meds-title">Today's medications</p>
-                    <p class="todays-meds-subtitle">Check off your medications as you take them</p>
-                </div>
-            </div>
-            """,
-                unsafe_allow_html=True,
-            )
-        with col2:
-            st.markdown("<div style='height: 0.75rem;'></div>", unsafe_allow_html=True)
-            if st.button(
-                "Open", key="go_todays_meds", use_container_width=True, type="primary"
-            ):
-                st.session_state.show_medication_logging = True
-                st.rerun()
-
-        st.markdown("---")
-
-        # Get user's family circles
-    user_circles = db.get_user_family_circles(user["id"])
-
-    if not user_circles:
-        # Empty state - no family circles
-        st.markdown(
-            """
- <div class="empty-state">
- <h3> No Family Circles Yet</h3>
- <p>Create your first family circle to start monitoring medications and connecting with family members.</p>
- </div>
- """,
-            unsafe_allow_html=True,
-        )
-
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button(
-                "Create Your First Family Circle",
-                key="create_first",
-                use_container_width=True,
-            ):
-                st.session_state.show_create_circle = True
-                st.rerun()
-
-        return
-
-        # Get dashboard data for the user
-    dashboard_data = family_manager.get_family_dashboard_data(user["id"])
-
-    if dashboard_data["total_patients"] == 0:
-        # Has circles but no patients
-        st.markdown("## Your Family Circles")
-        for circle in user_circles:
-            st.markdown(f"### {circle['name']}")
-            st.info(
-                f"**Invite Code:** `{circle['invite_code']}` - Share this with family members"
-            )
-
-        st.markdown(
-            """
- <div class="empty-state">
- <h3> No Patients Added Yet</h3>
- <p>Add elderly family members to start tracking their medications and health progress.</p>
- </div>
- """,
-            unsafe_allow_html=True,
-        )
-
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button(
-                "Add Your First Patient",
-                key="add_first_patient",
-                use_container_width=True,
-            ):
-                st.session_state.show_add_patient = True
-                st.rerun()
-
-        return
-
-        # Show full dashboard with data
-        # Overview metrics
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric(label="Patients Monitoring", value=dashboard_data["total_patients"])
-
-    with col2:
-        adherence = dashboard_data["average_adherence"]
-        color = "" if adherence >= 90 else "" if adherence >= 70 else ""
-        st.metric(
-            label=f"{color} Average Adherence",
-            value=f"{adherence}%" if adherence > 0 else "No data",
-        )
-
-    with col3:
-        st.metric(
-            label="Need Attention", value=dashboard_data["patients_needing_attention"]
-        )
-
-    with col4:
-        st.metric(
-            label="‍‍‍ Family Circles", value=len(dashboard_data["family_circles"])
-        )
-
-        # Alerts section
-    if dashboard_data["alerts"]:
-        st.markdown("## Alerts & Notifications")
-        for alert in dashboard_data["alerts"]:
-            if "low medication adherence" in alert:
-                st.markdown(
-                    f'<div class="alert-warning">{alert}</div>', unsafe_allow_html=True
-                )
-            else:
-                st.markdown(
-                    f'<div class="alert-success">{alert}</div>', unsafe_allow_html=True
-                )
-
-                # Patient status cards
-    st.markdown("## Patient Status Overview")
-
-    for patient in dashboard_data["patients_status"]:
-        with st.expander(
-            f"{patient['name']} ({patient['age']} years old)", expanded=True
-        ):
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.metric("Medications", patient["total_medications"])
-
-            with col2:
-                adherence = patient["adherence_rate"]
-                color = "" if adherence >= 90 else "" if adherence >= 70 else ""
-                st.metric(
-                    f"{color} Adherence",
-                    f"{adherence:.1f}%" if adherence > 0 else "No data",
-                )
-
-            with col3:
-                st.metric("Family Circle", patient["family_circle_name"])
-
-                # Get patient's medications
-            medications = db.get_patient_medications(patient["id"])
-
-            if medications:
-                st.markdown("**Current Medications:**")
-                med_data = []
-                for med in medications:
-                    med_data.append(
-                        {
-                            "Medication": med["name"],
-                            "Dosage": med["dosage"],
-                            "Times": ", ".join(med["times"]),
-                            "Notes": med["notes"] or "None",
-                        }
-                    )
-
-                st.dataframe(pd.DataFrame(med_data), use_container_width=True)
-            else:
-                st.info("No medications added yet for this patient.")
-
-                # Quick actions
-            st.markdown("**Quick Actions:**")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if st.button(f"View Details", key=f"details_{patient['id']}"):
-                    st.session_state["selected_patient"] = patient["id"]
-                    st.rerun()
-
-            with col2:
-                if st.button(f"Add Medication", key=f"add_med_{patient['id']}"):
-                    st.session_state["add_medication_for"] = patient["id"]
-                    st.rerun()
-
-            with col3:
-                if st.button(f"Log Doses", key=f"log_{patient['id']}"):
-                    st.session_state["show_medication_logging"] = True
-                    st.rerun()
-
-
+from utils.session import (
+    db as _db,
+    family_manager as _family_manager,
+    current_user,
+    init_session_state,
+)
 
 
 def render() -> None:
     init_session_state()
-    show_family_dashboard()
+    user = current_user()
+    if user is None:
+        st.info("Sign in to see the dashboard.")
+        return
+
+    db = _db()
+    family_manager = _family_manager()
+
+    page_shell(
+        "Dashboard",
+        eyebrow=f"Signed in as {user.get('type', 'user').title()}",
+        subtitle=f"Welcome back, {user['name']}.",
+    )
+
+    if user["type"] == "patient":
+        _render_patient_shortcut()
+
+    circles = db.get_user_family_circles(user["id"])
+
+    if not circles:
+        empty_state(
+            "No family circles yet",
+            "Create a circle to start monitoring together, or join one with an invite code.",
+        )
+        cols = st.columns([1, 1])
+        with cols[0]:
+            if st.button("Create a circle", key="dash_create", type="primary", use_container_width=True):
+                st.query_params["action"] = "create"
+                st.switch_page("pages/circle.py") if hasattr(st, "switch_page") else st.rerun()
+        with cols[1]:
+            if st.button("Join a circle", key="dash_join", use_container_width=True):
+                st.query_params["action"] = "join"
+                st.switch_page("pages/circle.py") if hasattr(st, "switch_page") else st.rerun()
+        return
+
+    data = family_manager.get_family_dashboard_data(user["id"])
+
+    if data["total_patients"] == 0:
+        _render_circles(circles)
+        divider(5)
+        empty_state(
+            "No patients yet",
+            "Add someone to a circle to start tracking their medications.",
+        )
+        if st.button("Add a patient", key="dash_add_patient", type="primary"):
+            st.session_state["show_add_patient"] = True
+            st.rerun()
+        return
+
+    _render_metrics(data)
+    divider(5)
+    _render_alerts(data)
+    _render_patient_grid(db, data)
+
+
+# ---------------------------------------------------------------------------
+
+def _render_patient_shortcut() -> None:
+    """Prominent card at top of dashboard for patient personas."""
+    st.markdown(
+        """
+        <div class="med-card page-fade" style="
+            margin-bottom: var(--space-6);
+            background: linear-gradient(135deg, var(--accent-subtle) 0%, var(--surface-card) 100%);
+            border-color: var(--border-strong);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:var(--space-5);">
+            <div>
+              <p class="eyebrow" style="color:var(--accent);">Right now</p>
+              <h2 style="margin:0;">Your medications for today</h2>
+              <p class="muted" style="margin: var(--space-2) 0 0 0;">Check them off as you take them.</p>
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.button("Open today's list", key="dash_open_today", type="primary"):
+        st.switch_page("pages/today.py") if hasattr(st, "switch_page") else st.rerun()
+    divider(6)
+
+
+def _render_circles(circles: list[dict]) -> None:
+    st.markdown('<h2>Your family circles</h2>', unsafe_allow_html=True)
+    stack_open()
+    for c in circles:
+        st.markdown(
+            f"""
+            <div class="med-card">
+              <h3 style="margin:0 0 var(--space-1) 0;">{c['name']}</h3>
+              <p class="muted tabular" style="margin:0;font-size:0.9375rem;">
+                Invite code: <span style="font-family:var(--font-mono);color:var(--text);">{c['invite_code']}</span>
+              </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    stack_close()
+
+
+def _render_metrics(data: dict) -> None:
+    st.markdown('<h2 style="margin-top: var(--space-6);">Overview</h2>', unsafe_allow_html=True)
+    cols = st.columns(4)
+    with cols[0]:
+        st.metric("Patients", data["total_patients"])
+    with cols[1]:
+        adh = data["average_adherence"]
+        st.metric("Avg adherence", f"{adh}%" if adh > 0 else "—")
+    with cols[2]:
+        st.metric("Need attention", data["patients_needing_attention"])
+    with cols[3]:
+        st.metric("Circles", len(data["family_circles"]))
+
+
+def _render_alerts(data: dict) -> None:
+    alerts = data.get("alerts") or []
+    if not alerts:
+        return
+    st.markdown('<h2 style="margin-top: var(--space-6);">Alerts</h2>', unsafe_allow_html=True)
+    for alert in alerts:
+        kind = "warning" if "low medication adherence" in alert else "success"
+        bg = "var(--warning-subtle)" if kind == "warning" else "var(--success-subtle)"
+        fg = "var(--warning)" if kind == "warning" else "var(--success)"
+        st.markdown(
+            f'<div class="med-card page-fade" style="background:{bg};color:{fg};'
+            f'border-color:{fg};padding: var(--space-4) var(--space-5);">{alert}</div>',
+            unsafe_allow_html=True,
+        )
+    divider(5)
+
+
+def _render_patient_grid(db, data: dict) -> None:
+    st.markdown('<h2 style="margin-top: var(--space-6);">Patients</h2>', unsafe_allow_html=True)
+    stack_open()
+    for p in data["patients_status"]:
+        adherence = p["adherence_rate"]
+        pill_kind = "success" if adherence >= 90 else "warning" if adherence >= 70 else "error"
+        adh_display = f"{adherence:.0f}% adherence" if adherence > 0 else "No data yet"
+        st.markdown(
+            f"""
+            <div class="med-card">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-4);">
+                <div>
+                  <h3 style="margin:0 0 var(--space-1) 0;">{p['name']}</h3>
+                  <p class="muted" style="margin:0;font-size:0.9375rem;">
+                    Age {p['age']} · {p['family_circle_name']} · {p['total_medications']} meds
+                  </p>
+                </div>
+                <div>{status_pill(adh_display, pill_kind)}</div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        cols = st.columns([1, 1, 1])
+        with cols[0]:
+            if st.button("View", key=f"view_{p['id']}", use_container_width=True):
+                st.query_params["id"] = str(p["id"])
+                if hasattr(st, "switch_page"):
+                    st.switch_page("pages/patient.py")
+                else:
+                    st.session_state["selected_patient"] = p["id"]
+                    st.rerun()
+        with cols[1]:
+            if st.button("Add med", key=f"addmed_{p['id']}", use_container_width=True):
+                st.query_params["patient"] = str(p["id"])
+                if hasattr(st, "switch_page"):
+                    st.switch_page("pages/add_med.py")
+                else:
+                    st.session_state["add_medication_for"] = p["id"]
+                    st.rerun()
+        with cols[2]:
+            if st.button("Log today", key=f"logtoday_{p['id']}", type="primary", use_container_width=True):
+                if hasattr(st, "switch_page"):
+                    st.switch_page("pages/today.py")
+                else:
+                    st.session_state["show_medication_logging"] = True
+                    st.rerun()
+        divider(3)
+    stack_close()

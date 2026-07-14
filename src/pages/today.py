@@ -1,389 +1,271 @@
-"""Today page — split from the original monolithic web_app.py.
+"""/today — patient's today's medications.
 
-Behaviour is preserved verbatim from the pre-modernization app. The visual
-redesign against ``design-system/MASTER.md`` happens in Commit 4.
+The most-used screen in the product. See ``design-system/pages/today.md``
+for the per-page override that governs this file.
 """
 
 from __future__ import annotations
 
 import sqlite3
-import time
 from datetime import datetime, timedelta
 
 import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 
-from models.family import FamilyCircleManager
-from services.auth import AuthService
-from services.notifications import NotificationService
-from utils.session import (
-    db as _db, family_manager as _family_manager,
-    auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+from ui.primitives import (
+    page_shell,
+    empty_state,
+    progress_ring,
+    status_pill,
+    divider,
+    stack_open,
+    stack_close,
 )
-
-
-def init_database():
-    """Compatibility shim — the legacy screens call this expecting (db, family_manager)."""
-    return _db(), _family_manager()
-
-
-def get_auth_service():
-    return _auth_service()
-
-
-def show_medication_logging():
-    """Show interface for logging today's medications."""
-    db, family_manager = init_database()
-    user = st.session_state.user_profile
-
-    if "snoozed_meds" not in st.session_state:
-        st.session_state.snoozed_meds = {}
-
-    st.markdown(
-        """
-    <style>
-        .page-eyebrow {
-            font-size: 0.8125rem;
-            font-weight: 500;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 0.25rem;
-        }
-        .page-title {
-            font-size: 1.875rem;
-            font-weight: 600;
-            letter-spacing: -0.02em;
-            color: var(--text);
-            margin-bottom: 2rem;
-        }
-        .progress-section {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1.25rem 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-        .progress-label {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            margin-bottom: 0.75rem;
-        }
-        .progress-label-text {
-            font-size: 0.9375rem;
-            font-weight: 500;
-            color: var(--text);
-        }
-        .progress-label-count {
-            font-size: 0.8125rem;
-            color: var(--text-muted);
-            font-variant-numeric: tabular-nums;
-        }
-        .med-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1.25rem 1.5rem;
-            margin: 0.75rem 0;
-            transition: border-color 0.15s ease;
-        }
-        .med-card:hover { border-color: var(--border-strong); }
-        .med-card-taken {
-            background: var(--surface);
-            border-color: var(--border);
-            opacity: 0.75;
-        }
-        .med-name {
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--text);
-            margin: 0 0 0.125rem 0;
-            letter-spacing: -0.01em;
-        }
-        .med-meta {
-            font-size: 0.875rem;
-            color: var(--text-muted);
-            margin: 0;
-            font-variant-numeric: tabular-nums;
-        }
-        .med-meta-sep { color: var(--text-subtle); margin: 0 0.375rem; }
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.375rem;
-            padding: 0.25rem 0.625rem;
-            border-radius: 4px;
-            font-size: 0.8125rem;
-            font-weight: 500;
-            font-variant-numeric: tabular-nums;
-        }
-        .status-badge-taken {
-            background: var(--success-subtle);
-            color: var(--success);
-            border: 1px solid rgba(5, 150, 105, 0.15);
-        }
-        .status-badge-snoozed {
-            background: var(--warning-subtle);
-            color: var(--warning);
-            border: 1px solid rgba(217, 119, 6, 0.15);
-        }
-        .status-badge-missed {
-            background: #FEF2F2;
-            color: var(--error);
-            border: 1px solid rgba(220, 38, 38, 0.15);
-        }
-        .med-note {
-            font-size: 0.8125rem;
-            color: var(--text-muted);
-            margin: 0.5rem 0 0 0;
-            padding-top: 0.5rem;
-            border-top: 1px solid var(--border);
-        }
-    </style>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    if st.button("Back", key="back_to_dash"):
-        st.session_state.show_medication_logging = False
-        st.rerun()
-
-    if user["type"] == "patient":
-        patient_id = user["id"]
-        patient_name = user["name"]
-    else:
-        circles = db.get_user_family_circles(user["id"])
-        if not circles:
-            st.warning("No family circles found.")
-            return
-
-        patients_status = db.get_family_patients_status(user["id"])
-        if not patients_status:
-            st.info("No patients to log medications for.")
-            return
-
-        patient_names = {p["id"]: p["name"] for p in patients_status}
-        selected_patient_id = st.selectbox(
-            "Patient",
-            options=list(patient_names.keys()),
-            format_func=lambda x: patient_names[x],
-            key="patient_selector",
-        )
-        patient_id = selected_patient_id
-        patient_name = patient_names[patient_id]
-
-    today_str = datetime.now().strftime("%A, %B %-d")
-    st.markdown(f'<p class="page-eyebrow">{today_str}</p>', unsafe_allow_html=True)
-    st.markdown(
-        '<h1 class="page-title">Today\'s medications</h1>', unsafe_allow_html=True
-    )
-
-    medications = db.get_patient_medications(patient_id)
-
-    if not medications:
-        st.markdown(
-            """
-        <div class="empty-state">
-            <h3>No medications scheduled</h3>
-            <p>Add medications from the dashboard to see them here.</p>
-        </div>
-        """,
-            unsafe_allow_html=True,
-        )
-        return
-
-    today = datetime.now().date().isoformat()
-
-    all_doses = []
-    for medication in medications:
-        for med_time in medication["times"]:
-            snooze_key = f"{medication['id']}_{med_time}"
-            if snooze_key in st.session_state.snoozed_meds:
-                snoozed_until = st.session_state.snoozed_meds[snooze_key]
-                if datetime.now() < snoozed_until:
-                    display_time = snoozed_until.strftime("%H:%M")
-                    is_snoozed = True
-                else:
-                    display_time = med_time
-                    is_snoozed = False
-                    del st.session_state.snoozed_meds[snooze_key]
-            else:
-                display_time = med_time
-                is_snoozed = False
-
-            try:
-                if hasattr(db, "db_path") and db.db_path:
-                    with sqlite3.connect(db.db_path) as conn:
-                        cursor = conn.execute(
-                            """
-                            SELECT taken, actual_time FROM dose_logs
-                            WHERE patient_id = ? AND medication_name = ?
-                            AND scheduled_time = ? AND date = ?
-                        """,
-                            (patient_id, medication["name"], med_time, today),
-                        )
-                        existing_log = cursor.fetchone()
-                else:
-                    result = (
-                        db.client.table("dose_logs")
-                        .select("taken, actual_time")
-                        .eq("patient_id", patient_id)
-                        .eq("medication_name", medication["name"])
-                        .eq("scheduled_time", med_time)
-                        .eq("date", today)
-                        .execute()
-                    )
-                    existing_log = (
-                        (result.data[0]["taken"], result.data[0]["actual_time"])
-                        if result.data
-                        else None
-                    )
-            except Exception:
-                existing_log = None
-
-            all_doses.append(
-                {
-                    "medication": medication,
-                    "scheduled_time": med_time,
-                    "display_time": display_time,
-                    "is_snoozed": is_snoozed,
-                    "existing_log": existing_log,
-                    "sort_time": datetime.strptime(display_time, "%H:%M").time(),
-                }
-            )
-
-    all_doses.sort(key=lambda x: x["sort_time"])
-
-    total_doses = len(all_doses)
-    taken_doses = sum(
-        1 for d in all_doses if d["existing_log"] and d["existing_log"][0]
-    )
-    progress_pct = (taken_doses / total_doses * 100) if total_doses > 0 else 0
-
-    st.markdown(
-        f"""
-    <div class="progress-section">
-        <div class="progress-label">
-            <span class="progress-label-text">Progress</span>
-            <span class="progress-label-count">{taken_doses} of {total_doses} taken</span>
-        </div>
-    </div>
-    """,
-        unsafe_allow_html=True,
-    )
-    st.progress(progress_pct / 100)
-
-    st.markdown("<div style='height: 1rem;'></div>", unsafe_allow_html=True)
-
-    for dose in all_doses:
-        medication = dose["medication"]
-        med_time = dose["scheduled_time"]
-        display_time = dose["display_time"]
-        existing_log = dose["existing_log"]
-        is_snoozed = dose["is_snoozed"]
-
-        try:
-            time_obj = datetime.strptime(display_time, "%H:%M")
-            formatted_time = time_obj.strftime("%-I:%M %p")
-        except ValueError:
-            formatted_time = display_time
-
-        card_class = (
-            "med-card med-card-taken"
-            if existing_log and existing_log[0]
-            else "med-card"
-        )
-
-        with st.container():
-            st.markdown(f'<div class="{card_class}">', unsafe_allow_html=True)
-
-            col1, col2 = st.columns([3, 2])
-
-            with col1:
-                st.markdown(
-                    f'<p class="med-name">{medication["name"]}</p>',
-                    unsafe_allow_html=True,
-                )
-                meta = f'{medication["dosage"]}<span class="med-meta-sep">·</span>{formatted_time}'
-                st.markdown(f'<p class="med-meta">{meta}</p>', unsafe_allow_html=True)
-
-                if is_snoozed:
-                    original_time = datetime.strptime(med_time, "%H:%M").strftime(
-                        "%-I:%M %p"
-                    )
-                    st.markdown(
-                        f'<span class="status-badge status-badge-snoozed">Snoozed from {original_time}</span>',
-                        unsafe_allow_html=True,
-                    )
-
-                if medication.get("notes"):
-                    st.markdown(
-                        f'<p class="med-note">{medication["notes"]}</p>',
-                        unsafe_allow_html=True,
-                    )
-
-            with col2:
-                if existing_log and existing_log[0]:
-                    taken_time = existing_log[1]
-                    try:
-                        taken_time_obj = datetime.strptime(taken_time, "%H:%M")
-                        taken_formatted = taken_time_obj.strftime("%-I:%M %p")
-                    except ValueError:
-                        taken_formatted = taken_time
-                    st.markdown(
-                        f'<div style="display: flex; justify-content: flex-end; align-items: center; height: 100%;">'
-                        f'<span class="status-badge status-badge-taken">Taken at {taken_formatted}</span>'
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                elif existing_log and not existing_log[0]:
-                    st.markdown(
-                        '<div style="display: flex; justify-content: flex-end; align-items: center; height: 100%;">'
-                        '<span class="status-badge status-badge-missed">Missed</span>'
-                        "</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                else:
-                    btn_col1, btn_col2 = st.columns(2)
-                    with btn_col1:
-                        if st.button(
-                            "Mark taken",
-                            key=f"take_{medication['id']}_{med_time}",
-                            use_container_width=True,
-                            type="primary",
-                        ):
-                            db.log_dose(
-                                patient_id,
-                                medication["name"],
-                                med_time,
-                                True,
-                                user["id"],
-                                datetime.now().strftime("%H:%M"),
-                            )
-                            st.rerun()
-                    with btn_col2:
-                        if st.button(
-                            "Snooze",
-                            key=f"snooze_{medication['id']}_{med_time}",
-                            use_container_width=True,
-                        ):
-                            snooze_key = f"{medication['id']}_{med_time}"
-                            snooze_until = datetime.now() + timedelta(minutes=30)
-                            st.session_state.snoozed_meds[snooze_key] = snooze_until
-                            st.toast(f"Snoozed {medication['name']} for 30 minutes")
-                            st.rerun()
-
-            st.markdown("</div>", unsafe_allow_html=True)
-
-
+from utils.session import db as _db, current_user, init_session_state
 
 
 def render() -> None:
     init_session_state()
-    show_medication_logging()
+    if "snoozed_meds" not in st.session_state:
+        st.session_state.snoozed_meds = {}
+
+    db = _db()
+    user = current_user()
+    if user is None:
+        st.info("Sign in to see today's medications.")
+        return
+
+    patient_id, patient_name = _resolve_patient(db, user)
+    if patient_id is None:
+        return
+
+    today_str = datetime.now().strftime("%A, %B %-d")
+
+    # Header
+    if user.get("type") == "patient":
+        page_shell("Today's medications", eyebrow=today_str)
+    else:
+        page_shell(
+            f"Today's medications",
+            eyebrow=f"{today_str} · {patient_name}",
+        )
+
+    medications = db.get_patient_medications(patient_id)
+
+    if not medications:
+        empty_state(
+            "No medications scheduled",
+            f"There's nothing scheduled for {patient_name} today. "
+            "Add a medication from the dashboard when you're ready.",
+        )
+        return
+
+    doses = _build_doses(db, patient_id, medications)
+
+    total = len(doses)
+    taken = sum(1 for d in doses if d["existing_log"] and d["existing_log"][0])
+    percent = (taken / total) if total else 0.0
+
+    # Progress ring + count
+    progress_ring(
+        percent,
+        label=f"{taken}/{total}",
+        sublabel="taken today",
+    )
+
+    if total and taken == total:
+        st.markdown(
+            '<p class="page-fade" style="text-align:center;font-size:1.125rem;'
+            'color:var(--success);margin:0 0 var(--space-6) 0;">'
+            "You're all set for today.</p>",
+            unsafe_allow_html=True,
+        )
+
+    divider(5)
+
+    # Per-dose cards
+    stack_open()
+    for dose in doses:
+        _render_dose_card(db, user, patient_id, dose)
+    stack_close()
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_patient(db, user):
+    """Return (patient_id, patient_name). Family members pick from their circles."""
+    if user.get("type") == "patient":
+        return user["id"], user["name"]
+
+    circles = db.get_user_family_circles(user["id"])
+    if not circles:
+        empty_state(
+            "No family circles yet",
+            "Create one from Family Circle to start tracking meds together.",
+        )
+        return None, None
+
+    statuses = db.get_family_patients_status(user["id"])
+    if not statuses:
+        empty_state(
+            "No patients yet",
+            "Invite a patient to your family circle to see their schedule here.",
+        )
+        return None, None
+
+    names = {p["id"]: p["name"] for p in statuses}
+    picked = st.selectbox(
+        "Patient",
+        options=list(names.keys()),
+        format_func=lambda x: names[x],
+        key="today_patient_selector",
+    )
+    return picked, names[picked]
+
+
+def _build_doses(db, patient_id: int, medications: list[dict]) -> list[dict]:
+    """Expand medications into per-dose entries, resolve snooze + existing logs, sort by time."""
+    today = datetime.now().date().isoformat()
+    doses: list[dict] = []
+
+    for med in medications:
+        for med_time in med["times"]:
+            snooze_key = f"{med['id']}_{med_time}"
+            snoozed_until = st.session_state.snoozed_meds.get(snooze_key)
+            if snoozed_until and datetime.now() < snoozed_until:
+                display_time = snoozed_until.strftime("%H:%M")
+                is_snoozed = True
+            else:
+                if snoozed_until:
+                    del st.session_state.snoozed_meds[snooze_key]
+                display_time = med_time
+                is_snoozed = False
+
+            existing_log = _lookup_dose_log(db, patient_id, med["name"], med_time, today)
+
+            doses.append({
+                "medication": med,
+                "scheduled_time": med_time,
+                "display_time": display_time,
+                "is_snoozed": is_snoozed,
+                "existing_log": existing_log,
+                "sort_time": datetime.strptime(display_time, "%H:%M").time(),
+            })
+
+    doses.sort(key=lambda x: x["sort_time"])
+    return doses
+
+
+def _lookup_dose_log(db, patient_id: int, med_name: str, scheduled: str, date: str):
+    """Return (taken, actual_time) tuple or None. Handles both DB backends."""
+    try:
+        if hasattr(db, "db_path") and db.db_path:
+            with sqlite3.connect(db.db_path) as conn:
+                cur = conn.execute(
+                    "SELECT taken, actual_time FROM dose_logs "
+                    "WHERE patient_id=? AND medication_name=? "
+                    "AND scheduled_time=? AND date=?",
+                    (patient_id, med_name, scheduled, date),
+                )
+                return cur.fetchone()
+        result = db.client.table("dose_logs").select("taken, actual_time").eq(
+            "patient_id", patient_id
+        ).eq("medication_name", med_name).eq(
+            "scheduled_time", scheduled
+        ).eq("date", date).execute()
+        if result.data:
+            return (result.data[0]["taken"], result.data[0]["actual_time"])
+        return None
+    except Exception:
+        return None
+
+
+def _render_dose_card(db, user, patient_id: int, dose: dict) -> None:
+    med = dose["medication"]
+    med_time = dose["scheduled_time"]
+    display_time = dose["display_time"]
+    existing_log = dose["existing_log"]
+    is_snoozed = dose["is_snoozed"]
+    taken = bool(existing_log and existing_log[0])
+
+    try:
+        formatted_time = datetime.strptime(display_time, "%H:%M").strftime("%-I:%M %p")
+    except ValueError:
+        formatted_time = display_time
+
+    card_style = (
+        "background: var(--surface-inset); opacity: 0.85;"
+        if taken
+        else "background: var(--surface-card);"
+    )
+
+    st.markdown(
+        f"""
+        <div class="med-card" style="{card_style}">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:var(--space-5);">
+            <div style="flex:1;">
+              <h3 style="margin:0 0 var(--space-1) 0;">{med['name']}</h3>
+              <p class="tabular" style="margin:0;color:var(--text-muted);font-size:1rem;">
+                {med['dosage']}<span style="color:var(--text-subtle);margin:0 0.5rem;">·</span>{formatted_time}
+              </p>
+              {'<div style="margin-top: var(--space-3);">' + status_pill(f"Snoozed from {datetime.strptime(med_time, '%H:%M').strftime('%-I:%M %p')}", 'warning') + '</div>' if is_snoozed else ''}
+              {f'<p class="muted" style="margin: var(--space-3) 0 0 0; padding-top: var(--space-3); border-top: 1px solid var(--border); font-size: 0.9375rem;">{med.get("notes", "")}</p>' if med.get('notes') else ''}
+            </div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Streamlit buttons render below the card — visually attach with negative margin via a helper div.
+    if taken:
+        taken_time = existing_log[1]
+        try:
+            taken_formatted = datetime.strptime(taken_time, "%H:%M").strftime("%-I:%M %p")
+        except ValueError:
+            taken_formatted = taken_time
+        st.markdown(
+            '<div style="margin: calc(-1 * var(--space-5)) 0 var(--space-3) 0; text-align: right;">'
+            + status_pill(f"Taken at {taken_formatted}", "success")
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    elif existing_log and not existing_log[0]:
+        st.markdown(
+            '<div style="margin: calc(-1 * var(--space-5)) 0 var(--space-3) 0; text-align: right;">'
+            + status_pill("Missed", "error")
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        cols = st.columns([1, 1])
+        with cols[0]:
+            if st.button(
+                "I took it",
+                key=f"take_{med['id']}_{med_time}",
+                use_container_width=True,
+                type="primary",
+            ):
+                db.log_dose(
+                    patient_id,
+                    med["name"],
+                    med_time,
+                    True,
+                    user["id"],
+                    datetime.now().strftime("%H:%M"),
+                )
+                st.rerun()
+        with cols[1]:
+            if st.button(
+                "Snooze 30 min",
+                key=f"snooze_{med['id']}_{med_time}",
+                use_container_width=True,
+            ):
+                st.session_state.snoozed_meds[f"{med['id']}_{med_time}"] = (
+                    datetime.now() + timedelta(minutes=30)
+                )
+                st.toast(f"Snoozed {med['name']} for 30 minutes")
+                st.rerun()
+
+    divider(3)

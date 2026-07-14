@@ -36,9 +36,15 @@ def get_auth_service():
 
 def show_getting_started():
     """Show getting started options after profile creation."""
+    from ui.primitives import page_shell
+
     user = st.session_state.user_profile
 
-    st.markdown(f"# Welcome, {user['name']}!")
+    page_shell(
+        f"Welcome, {user['name']}",
+        eyebrow="Getting started",
+        subtitle="A couple of choices to make this feel like yours.",
+    )
 
     if user["type"] == "family_member":
         st.markdown("## ‍‍‍ Create Your First Family Circle")
