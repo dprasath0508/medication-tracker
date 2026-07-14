@@ -134,17 +134,55 @@ def show_phone_login():
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Skip Login (Guest Mode)", type="secondary"):
-                st.session_state.show_login = False
+                _sign_in_as_guest()
                 st.rerun()
         with col2:
             if st.button("Reset All Data", type="secondary"):
                 db_path = "data/medications.db"
                 if os.path.exists(db_path):
                     os.remove(db_path)
-                    for key in list(st.session_state.keys()):
-                        del st.session_state[key]
-                    st.success("All data cleared!")
-                    st.rerun()
+                # Clear DB/auth singletons so the next request re-initialises
+                # against the fresh (empty) database.
+                st.cache_resource.clear()
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                st.success("All data cleared. Signing you out.")
+                st.rerun()
+
+
+def _sign_in_as_guest() -> None:
+    """Guest bypass — create or fetch a real 'Guest' patient row and sign in as them.
+
+    The new st.navigation-based router keys off ``user_profile`` (not the
+    legacy ``show_login`` flag), so guest mode needs to populate that dict
+    with a real user record. The Guest row lives in the DB like any other
+    user, which keeps us honest about the "no fake data" rule in CLAUDE.md.
+    """
+    db, _ = init_database()
+    users = db.get_users()
+    guest = next((u for u in users if u.get("email") == "guest@demo.local"), None)
+    if guest is None:
+        guest_id = db.add_user(
+            name="Guest",
+            email="guest@demo.local",
+            age=65,
+            role="patient",
+        )
+        guest = db.get_user_by_id(guest_id)
+
+    st.session_state.user_profile = {
+        "id": guest["id"],
+        "name": guest["name"],
+        "email": guest.get("email", ""),
+        "age": guest.get("age"),
+        "type": guest.get("role", "patient"),
+        "phone": guest.get("phone", ""),
+        "relationship": "patient",
+        "theme": guest.get("theme"),
+    }
+    st.session_state.onboarding_complete = True
+    if guest.get("theme"):
+        st.session_state["theme"] = guest["theme"]
 
 
 
