@@ -92,7 +92,7 @@ def show_phone_login():
 
     st.markdown("---")
     st.markdown(
-        '<p style="text-align: center; color: #666;">or</p>', unsafe_allow_html=True
+        '<p style="text-align: center; color: var(--text-muted);">or</p>', unsafe_allow_html=True
     )
 
     col1, col2 = st.columns(2)
@@ -228,7 +228,7 @@ def show_otp_verification():
     else:
         wait_time = 30 - int(elapsed)
         st.markdown(
-            f"<p style='text-align:center; color:#666;'>Resend available in {wait_time}s</p>",
+            f"<p style='text-align:center; color:var(--text-muted);'>Resend available in {wait_time}s</p>",
             unsafe_allow_html=True,
         )
 

@@ -99,15 +99,18 @@ def show_patient_details():
         title="Daily Medication Adherence",
         labels={"x": "Date", "y": "Adherence %"},
     )
+    # Plotly needs literal color values (can't consume CSS vars). These match
+    # the warm-cream theme; TODO expose theme_tokens() from ui.theme so this
+    # can follow theme switches.
     fig.update_traces(
-        line_color="#4a7c59", line_width=4, marker_color="#66bb6a", marker_size=8
+        line_color="#C2410C", line_width=3, marker_color="#C2410C", marker_size=8
     )
     fig.update_layout(
         yaxis_range=[0, 100],
-        plot_bgcolor="rgba(248, 255, 254, 0.8)",
-        paper_bgcolor="rgba(255, 255, 255, 0.9)",
-        title_font_color="#2d5a27",
-        font_color="#2d5a27",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        title_font_color="#2A241D",
+        font_color="#3F372E",
         title_font_size=18,
         showlegend=False,
     )
