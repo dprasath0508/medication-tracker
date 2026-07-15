@@ -9,8 +9,10 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 from supabase import create_client, Client
 
+from utils.authz import PatientAuthorizationMixin
 
-class MedicationDB:
+
+class MedicationDB(PatientAuthorizationMixin):
     """Supabase database handler for medication tracking with family circle support."""
 
     def __init__(self, db_path: str = None):
@@ -151,14 +153,37 @@ class MedicationDB:
             members.append(member)
         return members
 
+    # AUTHORIZATION (see utils/authz.py — the single chokepoint)
+    def _get_caller_permissions_for_patient(self, caller_id: int, patient_id: int) -> set:
+        """Union of the caller's permissions across circles shared with the patient."""
+        caller_rows = self.client.table('family_members').select(
+            'family_circle_id, permissions'
+        ).eq('user_id', caller_id).execute()
+        patient_rows = self.client.table('family_members').select(
+            'family_circle_id'
+        ).eq('user_id', patient_id).execute()
+
+        patient_circles = {row['family_circle_id'] for row in patient_rows.data}
+        permissions = set()
+        for row in caller_rows.data:
+            if row['family_circle_id'] in patient_circles:
+                permissions.update(row['permissions'])
+        return permissions
+
+    def get_patient(self, caller_id, patient_id: int) -> Optional[Dict[str, Any]]:
+        """Authorized single-patient lookup (replaces get_users() scans in pages)."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
+        return self.get_user_by_id(patient_id)
+
     # MEDICATION MANAGEMENT
-    def add_medication(self, patient_id: int, managed_by: int, name: str,
+    def add_medication(self, caller_id, patient_id: int, name: str,
                        dosage: str, frequency: str, times: List[str],
                        notes: str = None) -> int:
-        """Add a medication for a patient."""
+        """Add a medication for a patient. The caller is recorded as its manager."""
+        self._assert_can_access_patient(caller_id, patient_id, "write")
         data = {
             'patient_id': patient_id,
-            'managed_by': managed_by,
+            'managed_by': caller_id,
             'name': name,
             'dosage': dosage,
             'frequency': frequency,
@@ -169,8 +194,9 @@ class MedicationDB:
         result = self.client.table('medications').insert(data).execute()
         return result.data[0]['id']
 
-    def get_patient_medications(self, patient_id: int) -> List[Dict[str, Any]]:
+    def get_patient_medications(self, caller_id, patient_id: int) -> List[Dict[str, Any]]:
         """Get all active medications for a patient."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
         result = self.client.table('medications').select(
             '*, users!managed_by(name)'
         ).eq('patient_id', patient_id).eq('active', True).execute()
@@ -184,9 +210,10 @@ class MedicationDB:
             medications.append(med)
         return medications
 
-    def log_dose(self, patient_id: int, medication_name: str, scheduled_time: str,
-                 taken: bool, logged_by: int, actual_time: str = None) -> int:
-        """Log a dose taken/missed."""
+    def log_dose(self, caller_id, patient_id: int, medication_name: str, scheduled_time: str,
+                 taken: bool, actual_time: str = None) -> int:
+        """Log a dose taken/missed. The caller is recorded as the logger."""
+        self._assert_can_access_patient(caller_id, patient_id, "write")
         actual_time = actual_time or datetime.now().strftime("%H:%M")
         data = {
             'patient_id': patient_id,
@@ -196,14 +223,15 @@ class MedicationDB:
             'actual_time': actual_time,
             'date': datetime.now().date().isoformat(),
             'timestamp': datetime.now().isoformat(),
-            'logged_by': logged_by
+            'logged_by': caller_id
         }
         result = self.client.table('dose_logs').insert(data).execute()
         return result.data[0]['id']
 
-    def get_dose_log_for_date(self, patient_id: int, medication_name: str,
+    def get_dose_log_for_date(self, caller_id, patient_id: int, medication_name: str,
                               scheduled_time: str, date: str):
         """Return (taken, actual_time) tuple for a scheduled dose on a date, or None."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
         result = self.client.table('dose_logs').select('taken, actual_time').eq(
             'patient_id', patient_id
         ).eq('medication_name', medication_name).eq(
@@ -227,21 +255,22 @@ class MedicationDB:
             for member in members:
                 if member['role'] == 'patient' and member['id'] not in seen_ids:
                     seen_ids.add(member['id'])
-                    meds = self.get_patient_medications(member['id'])
+                    meds = self.get_patient_medications(family_member_id, member['id'])
                     patient = {
                         'id': member['id'],
                         'name': member['name'],
                         'age': member['age'],
                         'total_medications': len(meds),
                         'family_circle_name': circle['name'],
-                        'adherence_rate': self.get_patient_adherence(member['id'], days=7)
+                        'adherence_rate': self.get_patient_adherence(family_member_id, member['id'], days=7)
                     }
                     patients.append(patient)
 
         return patients
 
-    def get_patient_adherence(self, patient_id: int, days: int = 7) -> float:
+    def get_patient_adherence(self, caller_id, patient_id: int, days: int = 7) -> float:
         """Calculate adherence rate for patient over last X days."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
         start_date = (datetime.now() - timedelta(days=days)).date().isoformat()
 
         result = self.client.table('dose_logs').select('taken').eq(
@@ -254,6 +283,26 @@ class MedicationDB:
         total = len(result.data)
         taken = sum(1 for log in result.data if log['taken'])
         return (taken / total) * 100
+
+    def get_daily_dose_counts(self, caller_id, patient_id: int, days: int = 7) -> List[Dict[str, Any]]:
+        """Per-day dose totals for the last N days: [{'date', 'total', 'taken'}, ...].
+
+        Replaces the raw dose_logs SQL that pages/patient.py and
+        services/scheduler.py previously ran outside the data layer.
+        """
+        self._assert_can_access_patient(caller_id, patient_id, "read")
+        start_date = (datetime.now() - timedelta(days=days)).date().isoformat()
+
+        result = self.client.table('dose_logs').select('date, taken').eq(
+            'patient_id', patient_id
+        ).gte('date', start_date).execute()
+
+        counts = {}
+        for row in result.data:
+            entry = counts.setdefault(row['date'], {'date': row['date'], 'total': 0, 'taken': 0})
+            entry['total'] += 1
+            entry['taken'] += 1 if row['taken'] else 0
+        return [counts[d] for d in sorted(counts)]
 
     # USER CREDENTIALS
     def create_user_credentials(self, user_id: int, password_hash: str) -> int:

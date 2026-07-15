@@ -6,7 +6,9 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 import os
 
-class MedicationDB:
+from utils.authz import PatientAuthorizationMixin
+
+class MedicationDB(PatientAuthorizationMixin):
     """SQLite database handler for medication tracking with family circle support."""
     
     def __init__(self, db_path: str = "data/medications.db"):
@@ -302,20 +304,43 @@ class MedicationDB:
                 members.append(member)
             return members
     
+    # AUTHORIZATION (see utils/authz.py — the single chokepoint)
+    def _get_caller_permissions_for_patient(self, caller_id: int, patient_id: int) -> set:
+        """Union of the caller's permissions across circles shared with the patient."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("""
+                SELECT fm_caller.permissions
+                FROM family_members fm_caller
+                JOIN family_members fm_patient
+                  ON fm_caller.family_circle_id = fm_patient.family_circle_id
+                WHERE fm_caller.user_id = ? AND fm_patient.user_id = ?
+            """, (caller_id, patient_id))
+            permissions = set()
+            for (perms_json,) in cursor.fetchall():
+                permissions.update(json.loads(perms_json))
+            return permissions
+
+    def get_patient(self, caller_id, patient_id: int) -> Optional[Dict[str, Any]]:
+        """Authorized single-patient lookup (replaces get_users() scans in pages)."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
+        return self.get_user_by_id(patient_id)
+
     # MEDICATION MANAGEMENT (updated for family support)
-    def add_medication(self, patient_id: int, managed_by: int, name: str, dosage: str, frequency: str, times: List[str], notes: str = None) -> int:
-        """Add a medication for a patient (can be managed by family member)."""
+    def add_medication(self, caller_id, patient_id: int, name: str, dosage: str, frequency: str, times: List[str], notes: str = None) -> int:
+        """Add a medication for a patient. The caller is recorded as its manager."""
+        self._assert_can_access_patient(caller_id, patient_id, "write")
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                """INSERT INTO medications 
-                   (patient_id, managed_by, name, dosage, frequency, times, notes, created_date) 
+                """INSERT INTO medications
+                   (patient_id, managed_by, name, dosage, frequency, times, notes, created_date)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (patient_id, managed_by, name, dosage, frequency, json.dumps(times), notes, datetime.now().isoformat())
+                (patient_id, caller_id, name, dosage, frequency, json.dumps(times), notes, datetime.now().isoformat())
             )
             return cursor.lastrowid
-    
-    def get_patient_medications(self, patient_id: int) -> List[Dict[str, Any]]:
+
+    def get_patient_medications(self, caller_id, patient_id: int) -> List[Dict[str, Any]]:
         """Get all active medications for a patient."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
@@ -331,8 +356,9 @@ class MedicationDB:
                 medications.append(med)
             return medications
     
-    def log_dose(self, patient_id: int, medication_name: str, scheduled_time: str, taken: bool, logged_by: int, actual_time: str = None) -> int:
-        """Log a dose taken/missed."""
+    def log_dose(self, caller_id, patient_id: int, medication_name: str, scheduled_time: str, taken: bool, actual_time: str = None) -> int:
+        """Log a dose taken/missed. The caller is recorded as the logger."""
+        self._assert_can_access_patient(caller_id, patient_id, "write")
         actual_time = actual_time or datetime.now().strftime("%H:%M")
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
@@ -340,17 +366,18 @@ class MedicationDB:
                    (patient_id, medication_name, scheduled_time, taken, actual_time, date, timestamp, logged_by)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (patient_id, medication_name, scheduled_time, taken, actual_time,
-                 datetime.now().date().isoformat(), datetime.now().isoformat(), logged_by)
+                 datetime.now().date().isoformat(), datetime.now().isoformat(), caller_id)
             )
             return cursor.lastrowid
 
-    def get_dose_log_for_date(self, patient_id: int, medication_name: str,
+    def get_dose_log_for_date(self, caller_id, patient_id: int, medication_name: str,
                               scheduled_time: str, date: str):
         """Return the (taken, actual_time) tuple for a single scheduled dose on a date, or None.
 
         Callers (today's-meds screen) previously ran this SQL inline. Kept as a
         method here so the SQLite/Supabase backends can share a single caller.
         """
+        self._assert_can_access_patient(caller_id, patient_id, "read")
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
                 """SELECT taken, actual_time FROM dose_logs
@@ -382,16 +409,17 @@ class MedicationDB:
             for row in cursor.fetchall():
                 patient = dict(row)
                 # Get recent adherence
-                patient['adherence_rate'] = self.get_patient_adherence(patient['id'], days=7)
+                patient['adherence_rate'] = self.get_patient_adherence(family_member_id, patient['id'], days=7)
                 patients.append(patient)
             return patients
-    
-    def get_patient_adherence(self, patient_id: int, days: int = 7) -> float:
+
+    def get_patient_adherence(self, caller_id, patient_id: int, days: int = 7) -> float:
         """Calculate adherence rate for patient over last X days."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                """SELECT COUNT(*) as total, SUM(taken) as taken_count 
-                   FROM dose_logs 
+                """SELECT COUNT(*) as total, SUM(taken) as taken_count
+                   FROM dose_logs
                    WHERE patient_id = ? AND date >= date('now', '-{} days')""".format(days),
                 (patient_id,)
             )
@@ -399,6 +427,25 @@ class MedicationDB:
             if result[0] == 0:
                 return 0.0
             return (result[1] / result[0]) * 100
+
+    def get_daily_dose_counts(self, caller_id, patient_id: int, days: int = 7) -> List[Dict[str, Any]]:
+        """Per-day dose totals for the last N days: [{'date', 'total', 'taken'}, ...].
+
+        Replaces the raw dose_logs SQL that pages/patient.py and
+        services/scheduler.py previously ran outside the data layer.
+        """
+        self._assert_can_access_patient(caller_id, patient_id, "read")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """SELECT date, COUNT(*) as total, SUM(taken) as taken
+                   FROM dose_logs
+                   WHERE patient_id = ? AND date >= date('now', ?)
+                   GROUP BY date
+                   ORDER BY date""",
+                (patient_id, '-{} days'.format(int(days)))
+            )
+            return [dict(row) for row in cursor.fetchall()]
     
     def get_users(self) -> List[Dict[str, Any]]:
         """Get all users."""

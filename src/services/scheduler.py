@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 import logging
 from typing import Dict, List
 import json
-import sqlite3
 
 from services.notifications import NotificationService
+from utils.authz import SYSTEM_CALLER
 from utils.database import MedicationDB
 
 logging.basicConfig(level=logging.INFO)
@@ -28,8 +28,10 @@ class MedicationScheduler:
         
         for user in users:
             if user['role'] == 'patient':
-                medications = self.db.get_patient_medications(user['id'])
-                
+                # Background service: reads as the explicit (read-only) system
+                # identity — see utils/authz.py.
+                medications = self.db.get_patient_medications(SYSTEM_CALLER, user['id'])
+
                 for medication in medications:
                     self.schedule_medication_reminders(user, medication)
         
@@ -116,38 +118,28 @@ class MedicationScheduler:
     
     def _calculate_weekly_adherence(self, patient_id: int) -> Dict:
         """Calculate adherence data for the past week."""
-        # Get dose logs for past 7 days
         end_date = datetime.now().date()
         start_date = end_date - timedelta(days=7)
-        
-        # Query database for dose logs
-        with sqlite3.connect(self.db.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute("""
-                SELECT date, taken, medication_name
-                FROM dose_logs
-                WHERE patient_id = ? 
-                AND date >= ? AND date <= ?
-                ORDER BY date DESC
-            """, (patient_id, start_date.isoformat(), end_date.isoformat()))
-            
-            logs = [dict(row) for row in cursor.fetchall()]
-        
+
+        # Per-day dose counts via the data layer (previously raw SQL here)
+        rows = self.db.get_daily_dose_counts(SYSTEM_CALLER, patient_id, days=7)
+        by_date = {row['date']: row for row in rows}
+
         # Calculate statistics
-        total_doses = len(logs)
-        taken_doses = sum(1 for log in logs if log['taken'])
+        total_doses = sum(row['total'] for row in rows)
+        taken_doses = sum(row['taken'] for row in rows)
         missed_doses = total_doses - taken_doses
         adherence_rate = (taken_doses / total_doses * 100) if total_doses > 0 else 0
-        
+
         # Daily breakdown
         daily_data = []
         for i in range(7):
             day = end_date - timedelta(days=i)
-            day_logs = [log for log in logs if log['date'] == day.isoformat()]
-            day_taken = sum(1 for log in day_logs if log['taken'])
-            day_total = len(day_logs)
+            row = by_date.get(day.isoformat())
+            day_taken = row['taken'] if row else 0
+            day_total = row['total'] if row else 0
             day_rate = (day_taken / day_total * 100) if day_total > 0 else 0
-            
+
             daily_data.append({
                 'date': day.strftime('%A, %b %d'),
                 'taken': day_taken,

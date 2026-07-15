@@ -105,19 +105,22 @@ def sign_out() -> None:
 # ---------------------------------------------------------------------------
 
 
+# Cache keys include caller_id: entries are (caller, patient)-scoped so an
+# authorized read is never served from cache to a different, unauthorized
+# caller within the TTL. AuthorizationError propagates — st.cache_data does
+# not memoize raised exceptions.
+
+
 @st.cache_data(ttl=30, show_spinner=False)
-def cached_patient_medications(patient_id: int):
-    return _db_singleton().get_patient_medications(patient_id)
+def cached_patient_medications(caller_id: int, patient_id: int):
+    return _db_singleton().get_patient_medications(caller_id, patient_id)
 
 
 @st.cache_data(ttl=15, show_spinner=False)
-def cached_dose_log(patient_id: int, medication_name: str, scheduled_time: str, date: str):
-    try:
-        return _db_singleton().get_dose_log_for_date(
-            patient_id, medication_name, scheduled_time, date
-        )
-    except Exception:
-        return None
+def cached_dose_log(caller_id: int, patient_id: int, medication_name: str, scheduled_time: str, date: str):
+    return _db_singleton().get_dose_log_for_date(
+        caller_id, patient_id, medication_name, scheduled_time, date
+    )
 
 
 @st.cache_data(ttl=30, show_spinner=False)

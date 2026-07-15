@@ -6,7 +6,6 @@ redesign against ``design-system/MASTER.md`` happens in Commit 4.
 
 from __future__ import annotations
 
-import sqlite3
 import time
 from datetime import datetime, timedelta
 
@@ -18,6 +17,7 @@ import plotly.graph_objects as go
 from models.family import FamilyCircleManager
 from services.auth import AuthService
 from services.notifications import NotificationService
+from utils.authz import AuthorizationError
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
@@ -42,9 +42,19 @@ def show_patient_details():
     db, family_manager = init_database()
     patient_id = st.session_state["selected_patient"]
 
-    # Get patient info
-    users = db.get_users()
-    patient = next((u for u in users if u["id"] == patient_id), None)
+    user = current_user()
+    if user is None:
+        st.info("Sign in to see patient details.")
+        return
+
+    # Authorized lookup — ?id=<id> is untrusted input; this refuses before
+    # anything renders if the caller has no relationship to the patient
+    # (see utils/authz.py).
+    try:
+        patient = db.get_patient(user["id"], patient_id)
+    except AuthorizationError:
+        st.error("You don't have access to this patient's information.")
+        return
 
     if not patient:
         st.error("Patient not found")
@@ -69,25 +79,11 @@ def show_patient_details():
     st.markdown("## 7-Day Adherence Trend")
 
     # Get real adherence data from database
-    with sqlite3.connect(db.db_path) as conn:
-        cursor = conn.execute(
-            """
-            SELECT date, 
-                   COUNT(*) as total,
-                   SUM(taken) as taken
-            FROM dose_logs
-            WHERE patient_id = ? AND date >= date('now', '-7 days')
-            GROUP BY date
-            ORDER BY date
-        """,
-            (patient_id,),
-        )
-
-        logs = cursor.fetchall()
+    logs = db.get_daily_dose_counts(user["id"], patient_id, days=7)
 
     if logs:
-        dates = [datetime.fromisoformat(log[0]) for log in logs]
-        adherence_data = [(log[2] / log[1] * 100) if log[1] > 0 else 0 for log in logs]
+        dates = [datetime.fromisoformat(log["date"]) for log in logs]
+        adherence_data = [(log["taken"] / log["total"] * 100) if log["total"] > 0 else 0 for log in logs]
     else:
         # Mock data if no logs
         dates = [datetime.now().date() - timedelta(days=x) for x in range(6, -1, -1)]
@@ -119,7 +115,7 @@ def show_patient_details():
     # Medication schedule
     st.markdown("## ⏰ Today's Medication Schedule")
 
-    medications = db.get_patient_medications(patient_id)
+    medications = db.get_patient_medications(user["id"], patient_id)
 
     if medications:
         today = datetime.now().date().isoformat()
@@ -128,16 +124,9 @@ def show_patient_details():
         for med in medications:
             for time in med["times"]:
                 # Check if logged today
-                with sqlite3.connect(db.db_path) as conn:
-                    cursor = conn.execute(
-                        """
-                        SELECT taken FROM dose_logs
-                        WHERE patient_id = ? AND medication_name = ? 
-                        AND scheduled_time = ? AND date = ?
-                    """,
-                        (patient_id, med["name"], time, today),
-                    )
-                    log = cursor.fetchone()
+                log = db.get_dose_log_for_date(
+                    user["id"], patient_id, med["name"], time, today
+                )
 
                 if log:
                     status = "Taken" if log[0] else "Missed"

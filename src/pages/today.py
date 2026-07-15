@@ -56,7 +56,7 @@ def render() -> None:
             eyebrow=f"{today_str} · {patient_name}",
         )
 
-    medications = cached_patient_medications(patient_id)
+    medications = cached_patient_medications(user["id"], patient_id)
 
     if not medications:
         empty_state(
@@ -66,7 +66,7 @@ def render() -> None:
         )
         return
 
-    doses = _build_doses(db, patient_id, medications)
+    doses = _build_doses(db, user, patient_id, medications)
 
     total = len(doses)
     taken = sum(1 for d in doses if d["existing_log"] and d["existing_log"][0])
@@ -131,7 +131,7 @@ def _resolve_patient(db, user):
     return picked, names[picked]
 
 
-def _build_doses(db, patient_id: int, medications: list[dict]) -> list[dict]:
+def _build_doses(db, user: dict, patient_id: int, medications: list[dict]) -> list[dict]:
     """Expand medications into per-dose entries, resolve snooze + existing logs, sort by time."""
     today = datetime.now().date().isoformat()
     doses: list[dict] = []
@@ -149,7 +149,7 @@ def _build_doses(db, patient_id: int, medications: list[dict]) -> list[dict]:
                 display_time = med_time
                 is_snoozed = False
 
-            existing_log = _lookup_dose_log(db, patient_id, med["name"], med_time, today)
+            existing_log = _lookup_dose_log(db, user["id"], patient_id, med["name"], med_time, today)
 
             doses.append({
                 "medication": med,
@@ -164,9 +164,9 @@ def _build_doses(db, patient_id: int, medications: list[dict]) -> list[dict]:
     return doses
 
 
-def _lookup_dose_log(db, patient_id: int, med_name: str, scheduled: str, date: str):
+def _lookup_dose_log(db, caller_id: int, patient_id: int, med_name: str, scheduled: str, date: str):
     """Cached (taken, actual_time) tuple or None. Cache invalidates on log_dose."""
-    return cached_dose_log(patient_id, med_name, scheduled, date)
+    return cached_dose_log(caller_id, patient_id, med_name, scheduled, date)
 
 
 def _render_dose_card(db, user, patient_id: int, dose: dict) -> None:
@@ -236,11 +236,11 @@ def _render_dose_card(db, user, patient_id: int, dose: dict) -> None:
                 type="primary",
             ):
                 db.log_dose(
+                    user["id"],
                     patient_id,
                     med["name"],
                     med_time,
                     True,
-                    user["id"],
                     datetime.now().strftime("%H:%M"),
                 )
                 invalidate_read_caches()
