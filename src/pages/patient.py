@@ -21,7 +21,7 @@ from utils.authz import AuthorizationError
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+    init_session_state, current_user, sign_out, switch_to,
 )
 
 
@@ -68,12 +68,9 @@ def show_patient_details():
     )
 
     if st.button("Back to dashboard", key="patient_back"):
-        del st.session_state["selected_patient"]
+        st.session_state.pop("selected_patient", None)
         st.query_params.clear()
-        if hasattr(st, "switch_page"):
-            st.switch_page("pages/dashboard.py")
-        else:
-            st.rerun()
+        switch_to("dashboard")
 
         # Create adherence chart
     st.markdown("## 7-Day Adherence Trend")

@@ -95,31 +95,37 @@ def _render_sidebar() -> None:
 # ---------------------------------------------------------------------------
 def _build_nav():
     if current_user() is None:
-        return st.navigation(
-            [st.Page(auth_page.render, url_path="", title="Sign in", default=True)],
-            position="hidden",
-        )
+        signin = st.Page(auth_page.render, url_path="", title="Sign in", default=True)
+        st.session_state["_pages"] = {"auth": signin}
+        return st.navigation([signin], position="hidden")
 
     user = current_user()
     is_patient = user.get("type") == "patient"
 
     # First page is default; order controls sidebar order.
-    pages = []
     if is_patient:
-        pages.append(st.Page(today_page.render, url_path="", title="Today's meds", default=True))
-        pages.append(st.Page(dashboard_page.render, url_path="dashboard", title="Dashboard"))
+        today = st.Page(today_page.render, url_path="", title="Today's meds", default=True)
+        dashboard = st.Page(dashboard_page.render, url_path="dashboard", title="Dashboard")
+        pages = [today, dashboard]
     else:
-        pages.append(st.Page(dashboard_page.render, url_path="", title="Dashboard", default=True))
-        pages.append(st.Page(today_page.render, url_path="today", title="Today's meds"))
+        dashboard = st.Page(dashboard_page.render, url_path="", title="Dashboard", default=True)
+        today = st.Page(today_page.render, url_path="today", title="Today's meds")
+        pages = [dashboard, today]
 
-    pages.extend([
-        st.Page(patient_page.render, url_path="patients", title="Patient"),
-        st.Page(add_med_page.render, url_path="add-med", title="Add med"),
-        st.Page(circle_page.render, url_path="circle", title="Family circle"),
-        st.Page(onboarding_page.render, url_path="onboarding", title="Getting started"),
-        st.Page(settings_page.render, url_path="settings", title="Settings"),
-        st.Page(home_page.render, url_path="home", title="Home"),
-    ])
+    registry = {
+        "today": today,
+        "dashboard": dashboard,
+        "patient": st.Page(patient_page.render, url_path="patients", title="Patient"),
+        "add_med": st.Page(add_med_page.render, url_path="add-med", title="Add med"),
+        "circle": st.Page(circle_page.render, url_path="circle", title="Family circle"),
+        "onboarding": st.Page(onboarding_page.render, url_path="onboarding", title="Getting started"),
+        "settings": st.Page(settings_page.render, url_path="settings", title="Settings"),
+        "home": st.Page(home_page.render, url_path="home", title="Home"),
+    }
+    # Pages call switch_to(key) against this registry; st.switch_page needs
+    # the st.Page objects registered with st.navigation, not file paths.
+    st.session_state["_pages"] = registry
+    pages.extend(p for k, p in registry.items() if k not in ("today", "dashboard"))
     return st.navigation(pages)
 
 

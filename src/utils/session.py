@@ -80,6 +80,18 @@ def is_authenticated() -> bool:
     return current_user() is not None
 
 
+def switch_to(page_key: str) -> None:
+    """Switch to a page from the registry web_app builds each run.
+
+    st.switch_page must receive the st.Page objects passed to st.navigation;
+    file-path strings only work with the legacy pages/ directory router.
+    """
+    page = st.session_state.get("_pages", {}).get(page_key)
+    if page is None:
+        raise KeyError(f"No page registered for {page_key!r}")
+    st.switch_page(page)
+
+
 def sign_out() -> None:
     """Clear all session state related to the user's session, keeping the DB caches."""
     token = st.session_state.get("session_token")

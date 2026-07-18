@@ -22,7 +22,7 @@ from utils.authz import AuthorizationError
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+    init_session_state, current_user, sign_out, switch_to,
 )
 
 
@@ -69,12 +69,9 @@ def show_add_medication():
     )
 
     if st.button("Back to dashboard", key="addmed_back"):
-        del st.session_state["add_medication_for"]
+        st.session_state.pop("add_medication_for", None)
         st.query_params.clear()
-        if hasattr(st, "switch_page"):
-            st.switch_page("pages/dashboard.py")
-        else:
-            st.rerun()
+        switch_to("dashboard")
 
     with st.form("add_medication_form"):
         col1, col2 = st.columns(2)

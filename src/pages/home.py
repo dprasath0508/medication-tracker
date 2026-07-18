@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from utils.session import init_session_state, current_user
+from utils.session import init_session_state, current_user, switch_to
 
 
 def render() -> None:
@@ -12,7 +12,10 @@ def render() -> None:
     user = current_user()
 
     if user is None:
-        st.switch_page("pages/auth.py") if _can_switch() else _fallback("/auth")
+        try:
+            switch_to("auth")
+        except KeyError:
+            _fallback("/auth")
         return
 
     if not st.session_state.get("onboarding_complete"):
@@ -23,10 +26,6 @@ def render() -> None:
         _fallback("/today")
     else:
         _fallback("/dashboard")
-
-
-def _can_switch() -> bool:
-    return hasattr(st, "switch_page")
 
 
 def _fallback(path: str) -> None:
