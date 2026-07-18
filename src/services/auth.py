@@ -150,8 +150,13 @@ class AuthService:
             expiry_minutes=self.OTP_EXPIRY_MINUTES
         )
 
-        # Send OTP via SMS
-        if self.notifications:
+        # Send OTP via SMS. Having a NotificationService instance is not the
+        # same as SMS being configured — without Twilio credentials send_sms
+        # always fails, which used to dead-end signup on dev machines.
+        sms_configured = bool(
+            self.notifications and getattr(self.notifications, 'twilio_client', None)
+        )
+        if sms_configured:
             message = f"Your FamilyCare verification code is: {otp}. Valid for {self.OTP_EXPIRY_MINUTES} minutes."
             sent = self.notifications.send_sms(normalized_phone, message)
             if not sent:
@@ -164,12 +169,18 @@ class AuthService:
             # For development without SMS configured
             logger.info(f"[DEV] OTP for {normalized_phone}: {otp}")
 
-        return {
+        result = {
             'success': True,
             'message': f'Verification code sent to {self.format_phone_display(normalized_phone)}',
             'phone': normalized_phone,
             'expires_in': self.OTP_EXPIRY_MINUTES * 60  # seconds
         }
+        if not sms_configured and os.getenv('MEDSYNC_DEV_SHOW_OTP') == '1':
+            # Dev-only escape hatch: exposing the OTP to the requester lets
+            # anyone sign in as any phone number, so it must never be on in
+            # production. Requires the env var to be set explicitly.
+            result['dev_otp'] = otp
+        return result
 
     def verify_otp(self, phone: str, otp_code: str) -> Dict[str, Any]:
         """

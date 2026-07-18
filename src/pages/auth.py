@@ -100,6 +100,7 @@ def show_phone_login():
                     if result["success"]:
                         st.session_state.auth_phone = result["phone"]
                         st.session_state.otp_sent_time = time.time()
+                        st.session_state.dev_otp = result.get("dev_otp")
                         st.session_state.auth_step = "otp"
                         st.success(result["message"])
                         st.rerun()
@@ -212,6 +213,13 @@ def show_otp_verification():
     else:
         st.warning("Code may have expired. Request a new one.")
 
+    if st.session_state.get("dev_otp"):
+        st.warning(
+            f"SMS is not configured on this machine, so no text was sent. "
+            f"Your verification code is **{st.session_state.dev_otp}** "
+            f"(shown because MEDSYNC_DEV_SHOW_OTP=1)."
+        )
+
     with st.form("otp_form"):
         otp_code = st.text_input(
             "Verification Code",
@@ -234,6 +242,7 @@ def show_otp_verification():
                 result = auth.verify_otp(phone, otp_code)
 
                 if result["success"]:
+                    st.session_state.pop("dev_otp", None)
                     if result.get("is_new_user"):
                         # New user - need to complete profile
                         st.session_state.is_new_user = True
@@ -277,6 +286,7 @@ def show_otp_verification():
             result = auth.request_otp(phone, purpose="login")
             if result["success"]:
                 st.session_state.otp_sent_time = time.time()
+                st.session_state.dev_otp = result.get("dev_otp")
                 st.success("New code sent!")
                 st.rerun()
             else:
@@ -554,6 +564,7 @@ def show_register_screen():
                         if result["success"]:
                             st.session_state.auth_phone = result["phone"]
                             st.session_state.otp_sent_time = time.time()
+                            st.session_state.dev_otp = result.get("dev_otp")
                             st.session_state.show_register = False
                             st.session_state.show_login = True
                             st.session_state.auth_step = "otp"
