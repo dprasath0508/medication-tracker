@@ -1,5 +1,7 @@
 # medication-tracker
 
+[![CI](https://github.com/dprasath0508/medication-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/dprasath0508/medication-tracker/actions/workflows/ci.yml)
+
 A warm, semi-formal Streamlit + Supabase app for elderly patients (55+, often
 75+) and their family support circle. Built to help someone open the app once
 a day, see exactly which medications to take, mark them done, and close it

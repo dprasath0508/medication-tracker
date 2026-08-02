@@ -770,7 +770,7 @@ def show_profile_setup():
     """Show profile setup form."""
     user_type = st.session_state.get("user_type", "family_member")
 
-    st.markdown(f"# Set Up Your Profile")
+    st.markdown("# Set Up Your Profile")
     st.markdown(
         f"**Account Type:** {'Family Member' if user_type == 'family_member' else 'Patient'}"
     )

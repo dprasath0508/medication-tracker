@@ -236,7 +236,7 @@ def show_database_stats():
     patients = [u for u in users if u['role'] == 'patient']
     family_members = [u for u in users if u['role'] == 'family_member']
     
-    logger.info(f"\n👥 Users:")
+    logger.info("\n👥 Users:")
     logger.info(f"   Total: {len(users)}")
     logger.info(f"   Patients: {len(patients)}")
     logger.info(f"   Family Members: {len(family_members)}")
@@ -248,7 +248,7 @@ def show_database_stats():
             meds = db.get_patient_medications(SYSTEM_CALLER, user['id'])
             total_medications += len(meds)
     
-    logger.info(f"\n💊 Medications:")
+    logger.info("\n💊 Medications:")
     logger.info(f"   Total Active: {total_medications}")
     
     # Count dose logs
@@ -263,7 +263,7 @@ def show_database_stats():
         cursor = conn.execute("SELECT COUNT(*) FROM family_circles")
         total_circles = cursor.fetchone()[0]
     
-    logger.info(f"\n📝 Dose Logs:")
+    logger.info("\n📝 Dose Logs:")
     logger.info(f"   Total: {total_logs}")
     logger.info(f"   Taken: {taken_logs}")
     logger.info(f"   Missed: {total_logs - taken_logs}")
@@ -272,7 +272,7 @@ def show_database_stats():
         adherence = (taken_logs / total_logs) * 100
         logger.info(f"   Overall Adherence: {adherence:.1f}%")
     
-    logger.info(f"\n👨‍👩‍👧‍👦 Family Circles:")
+    logger.info("\n👨‍👩‍👧‍👦 Family Circles:")
     logger.info(f"   Total: {total_circles}")
     
     logger.info("\n" + "=" * 60)
@@ -333,7 +333,7 @@ def check_environment():
         logger.info(f"   ✅ Database exists: {db_path}")
         logger.info(f"   Size: {size:.2f} KB")
     else:
-        logger.warning(f"   ⚠️  Database not found (will be created on first use)")
+        logger.warning("   ⚠️  Database not found (will be created on first use)")
     
     logger.info("\n" + "=" * 60)
 

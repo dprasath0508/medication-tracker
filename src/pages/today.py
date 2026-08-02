@@ -52,7 +52,7 @@ def render() -> None:
         page_shell("Today's medications", eyebrow=today_str)
     else:
         page_shell(
-            f"Today's medications",
+            "Today's medications",
             eyebrow=f"{today_str} · {patient_name}",
         )
 
