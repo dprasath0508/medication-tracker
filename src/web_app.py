@@ -17,6 +17,13 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import streamlit as st
+from dotenv import load_dotenv
+
+# Load .env before anything selects a database backend. The Streamlit
+# entrypoint does not read .env on its own, so without this SUPABASE_URL /
+# SUPABASE_KEY (and MEDSYNC_OTP_SECRET) are absent and db_factory silently
+# falls back to SQLite.
+load_dotenv()
 
 from ui import theme
 from ui.icons import icon
