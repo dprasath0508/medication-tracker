@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import hashlib
+import hmac
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, Tuple, List
@@ -17,6 +18,27 @@ from phonenumbers import NumberParseException
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# OTP hashes are keyed with HMAC-SHA256 rather than a bare digest. A 6-digit
+# OTP has only 10^6 possible values, so an unkeyed hash (the old plain SHA-256)
+# is reversed by brute force in about a second by anyone with DB read access.
+# The security here comes from the server-side secret, not a work factor, so
+# verification stays fast — HMAC is the right fit, not bcrypt.
+#
+# Set MEDSYNC_OTP_SECRET in production. Without it we fall back to a random
+# per-process secret: OTPs are short-lived (5 min), so invalidating any pending
+# codes on restart is harmless, and a random key is still strong. The secret is
+# resolved once at import so every AuthService instance in the process shares
+# it — a per-instance secret would make request and verify disagree.
+_OTP_SECRET = os.getenv('MEDSYNC_OTP_SECRET')
+if not _OTP_SECRET:
+    logger.warning(
+        "MEDSYNC_OTP_SECRET is not set; using a random per-process secret. "
+        "Pending OTPs will not survive a restart. Set it in production."
+    )
+    _OTP_SECRET = secrets.token_hex(32)
+_OTP_SECRET_BYTES = _OTP_SECRET.encode()
 
 
 class AuthService:
@@ -80,8 +102,12 @@ class AuthService:
         return ''.join(secrets.choice('0123456789') for _ in range(self.OTP_LENGTH))
 
     def _hash_otp(self, otp: str) -> str:
-        """Hash OTP using SHA-256 (fast for OTP verification)."""
-        return hashlib.sha256(otp.encode()).hexdigest()
+        """Hash an OTP with HMAC-SHA256 keyed by a server-side secret.
+
+        Keyed so DB read access alone cannot reverse the tiny 10^6 OTP
+        keyspace. Compare hashes with ``hmac.compare_digest`` at the call site.
+        """
+        return hmac.new(_OTP_SECRET_BYTES, otp.encode(), hashlib.sha256).hexdigest()
 
     def _check_otp_rate_limit(self, phone: str) -> Tuple[bool, str]:
         """
@@ -223,7 +249,7 @@ class AuthService:
 
         # Verify OTP
         otp_hash = self._hash_otp(otp_code)
-        if otp_hash != otp_record['otp_hash']:
+        if not hmac.compare_digest(otp_hash, otp_record['otp_hash']):
             self.db.increment_otp_attempts(otp_record['id'])
             remaining = self.MAX_OTP_ATTEMPTS - otp_record['attempts'] - 1
             self.db.record_login_attempt(normalized_phone, 'phone_otp', False)
