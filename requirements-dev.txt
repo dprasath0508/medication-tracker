@@ -1,0 +1,2 @@
+# Development and test dependencies. Production installs use requirements.txt only.
+pytest>=8.0.0

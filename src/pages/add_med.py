@@ -18,10 +18,11 @@ import plotly.graph_objects as go
 from models.family import FamilyCircleManager
 from services.auth import AuthService
 from services.notifications import NotificationService
+from utils.authz import AuthorizationError
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+    init_session_state, current_user, sign_out, switch_to,
 )
 
 
@@ -42,9 +43,19 @@ def show_add_medication():
     db, family_manager = init_database()
     patient_id = st.session_state["add_medication_for"]
 
-    # Get patient info
-    users = db.get_users()
-    patient = next((u for u in users if u["id"] == patient_id), None)
+    user = current_user()
+    if user is None:
+        st.info("Sign in to add medications.")
+        return
+
+    # Authorized lookup — ?patient=<id> is untrusted input; this refuses
+    # before the form ever renders if the caller has no relationship to
+    # the patient (see utils/authz.py).
+    try:
+        patient = db.get_patient(user["id"], patient_id)
+    except AuthorizationError:
+        st.error("You don't have access to this patient's information.")
+        return
 
     if not patient:
         st.error("Patient not found")
@@ -58,12 +69,9 @@ def show_add_medication():
     )
 
     if st.button("Back to dashboard", key="addmed_back"):
-        del st.session_state["add_medication_for"]
+        st.session_state.pop("add_medication_for", None)
         st.query_params.clear()
-        if hasattr(st, "switch_page"):
-            st.switch_page("pages/dashboard.py")
-        else:
-            st.rerun()
+        switch_to("dashboard")
 
     with st.form("add_medication_form"):
         col1, col2 = st.columns(2)
@@ -117,18 +125,21 @@ def show_add_medication():
 
         if submitted:
             if medication_name and dosage:
-                user = st.session_state.user_profile
-                family_manager.add_medication_for_patient(
-                    user["id"],
-                    patient_id,
-                    {
-                        "name": medication_name,
-                        "dosage": dosage,
-                        "frequency": frequency,
-                        "times": times,
-                        "notes": notes,
-                    },
-                )
+                try:
+                    family_manager.add_medication_for_patient(
+                        user["id"],
+                        patient_id,
+                        {
+                            "name": medication_name,
+                            "dosage": dosage,
+                            "frequency": frequency,
+                            "times": times,
+                            "notes": notes,
+                        },
+                    )
+                except AuthorizationError:
+                    st.error("You don't have permission to add medications for this patient.")
+                    return
                 st.success(f"Added {medication_name} for {patient['name']}")
                 st.info("Automated reminders will be sent at scheduled times!")
                 st.balloons()

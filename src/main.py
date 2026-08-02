@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 # Add the current directory to the path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from utils.authz import SYSTEM_CALLER
 from utils.db_factory import get_database
 from services.scheduler import MedicationScheduler
 from services.notifications import NotificationService
@@ -156,7 +157,7 @@ def show_scheduled_jobs():
     
     for user in users:
         if user['role'] == 'patient':
-            medications = db.get_patient_medications(user['id'])
+            medications = db.get_patient_medications(SYSTEM_CALLER, user['id'])
             
             if medications:
                 logger.info(f"\n👤 {user['name']} ({user['email']})")
@@ -244,7 +245,7 @@ def show_database_stats():
     total_medications = 0
     for user in users:
         if user['role'] == 'patient':
-            meds = db.get_patient_medications(user['id'])
+            meds = db.get_patient_medications(SYSTEM_CALLER, user['id'])
             total_medications += len(meds)
     
     logger.info(f"\n💊 Medications:")

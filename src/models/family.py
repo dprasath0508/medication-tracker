@@ -97,10 +97,10 @@ class FamilyCircleManager:
         return alerts
     
     def add_medication_for_patient(self, family_member_id: int, patient_id: int, medication_data: Dict[str, Any]) -> int:
-        """Family member adds medication for a patient."""
+        """Family member adds medication for a patient. Authorization happens in the DB layer."""
         return self.db.add_medication(
+            caller_id=family_member_id,
             patient_id=patient_id,
-            managed_by=family_member_id,
             name=medication_data['name'],
             dosage=medication_data['dosage'],
             frequency=medication_data['frequency'],

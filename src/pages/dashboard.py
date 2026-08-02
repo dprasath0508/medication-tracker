@@ -23,6 +23,7 @@ from utils.session import (
     current_user,
     init_session_state,
     cached_user_family_circles,
+    switch_to,
 )
 
 
@@ -56,11 +57,11 @@ def render() -> None:
         with cols[0]:
             if st.button("Create a circle", key="dash_create", type="primary", use_container_width=True):
                 st.query_params["action"] = "create"
-                st.switch_page("pages/circle.py") if hasattr(st, "switch_page") else st.rerun()
+                switch_to("circle")
         with cols[1]:
             if st.button("Join a circle", key="dash_join", use_container_width=True):
                 st.query_params["action"] = "join"
-                st.switch_page("pages/circle.py") if hasattr(st, "switch_page") else st.rerun()
+                switch_to("circle")
         return
 
     data = family_manager.get_family_dashboard_data(user["id"])
@@ -105,7 +106,7 @@ def _render_patient_shortcut() -> None:
         unsafe_allow_html=True,
     )
     if st.button("Open today's list", key="dash_open_today", type="primary"):
-        st.switch_page("pages/today.py") if hasattr(st, "switch_page") else st.rerun()
+        switch_to("today")
     divider(6)
 
 
@@ -185,25 +186,13 @@ def _render_patient_grid(db, data: dict) -> None:
         with cols[0]:
             if st.button("View", key=f"view_{p['id']}", use_container_width=True):
                 st.query_params["id"] = str(p["id"])
-                if hasattr(st, "switch_page"):
-                    st.switch_page("pages/patient.py")
-                else:
-                    st.session_state["selected_patient"] = p["id"]
-                    st.rerun()
+                switch_to("patient")
         with cols[1]:
             if st.button("Add med", key=f"addmed_{p['id']}", use_container_width=True):
                 st.query_params["patient"] = str(p["id"])
-                if hasattr(st, "switch_page"):
-                    st.switch_page("pages/add_med.py")
-                else:
-                    st.session_state["add_medication_for"] = p["id"]
-                    st.rerun()
+                switch_to("add_med")
         with cols[2]:
             if st.button("Log today", key=f"logtoday_{p['id']}", type="primary", use_container_width=True):
-                if hasattr(st, "switch_page"):
-                    st.switch_page("pages/today.py")
-                else:
-                    st.session_state["show_medication_logging"] = True
-                    st.rerun()
+                switch_to("today")
         divider(3)
     stack_close()

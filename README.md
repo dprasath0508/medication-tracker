@@ -19,6 +19,40 @@ streamlit run src/web_app.py
 The app auto-selects Supabase when `SUPABASE_URL` and `SUPABASE_KEY` are set,
 and falls back to SQLite (`data/medications.db`) for local development.
 
+## Security model
+
+Authorization is enforced in the application's data layer, not in the database.
+Understanding why is the point of this section.
+
+**Trust boundary.** Streamlit runs entirely server-side. The Supabase service
+key (`SUPABASE_KEY`) lives only in the server environment and never reaches a
+browser — the client only ever receives rendered HTML. Every database access
+goes through the Python process, so that process is the boundary that has to
+decide who sees what.
+
+**The chokepoint.** Every patient-scoped data method — read or write, on both
+the SQLite and Supabase backends — calls `_assert_can_access_patient` in
+[`src/utils/authz.py`](src/utils/authz.py) as its first statement. A patient
+always reaches their own data; anyone else needs the right permission in a
+family circle shared with the patient (`view` to read, `manage_meds` to write).
+Denial raises `AuthorizationError`, never a silent empty result — an empty list
+reads as "no data" and would hide the bug. There is no bypass variant, by
+design: a bypass method is how this regresses in six months.
+
+**Why not Row Level Security?** Supabase RLS looks like the obvious answer and
+is deliberately not used. This app rolls its own auth (custom `users` table,
+bcrypt credentials, session tokens) rather than Supabase Auth, so there is no
+Supabase JWT and `auth.uid()` is always NULL. The app also connects with the
+service key, which bypasses RLS entirely. Any policy written today would either
+never evaluate (service key) or deny everything (anon key) — security theater
+either way. `supabase_schema.sql` therefore ships with RLS off and documents
+the reasoning inline.
+
+**Migration path.** The real fix is to adopt Supabase Auth so requests carry a
+JWT, connect from the browser with the anon key, then enable RLS with per-table
+policies as defense in depth *behind* the application chokepoint. That is future
+work, not this sprint.
+
 ## Design system
 
 Full spec in [`design-system/MASTER.md`](design-system/MASTER.md). Per-page

@@ -163,19 +163,31 @@ CREATE INDEX IF NOT EXISTS idx_sessions_token ON user_sessions(session_token);
 CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_verifications(phone);
 
 -- =============================================================================
--- ENABLE ROW LEVEL SECURITY ON ALL TABLES
+-- ROW LEVEL SECURITY — intentionally NOT enabled (read this before adding it)
 -- =============================================================================
--- Note: RLS is enabled but no policies are added yet.
--- You will need to add policies based on your authentication strategy.
-
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE medications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE dose_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE family_circles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE family_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE reminders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_credentials ENABLE ROW LEVEL SECURITY;
-ALTER TABLE otp_verifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE user_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE invite_codes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE login_attempts ENABLE ROW LEVEL SECURITY;
+-- This schema deliberately ships with RLS DISABLED and zero policies. That is
+-- the honest state, not an oversight. Do NOT "harden" it by enabling RLS and
+-- writing auth.uid()-based policies — under this app's architecture they would
+-- be inert, and the appearance of security is worse than its visible absence.
+--
+-- Why RLS cannot enforce anything here:
+--   * The app rolls its own auth: a custom `users` table with BIGSERIAL ids,
+--     bcrypt credentials in `user_credentials`, and session tokens in
+--     `user_sessions`. It does NOT use Supabase Auth.
+--   * With no Supabase Auth there is no Supabase JWT, so `auth.uid()` is always
+--     NULL. Any policy referencing it can never match a real user.
+--   * The app connects with a single service (secret) key from SUPABASE_KEY.
+--     The service role BYPASSES RLS entirely, so policies never even evaluate.
+--   * Enabling RLS with no policies would therefore be inert under the service
+--     key (today), or deny every query under the anon key — breaking the app.
+--
+-- Where authorization actually lives:
+--   Every patient-scoped data method routes through one chokepoint,
+--   _assert_can_access_patient in src/utils/authz.py, enforced identically in
+--   both DB backends. That is the real trust boundary. See HARDENING_SPRINT.md
+--   Finding 1 and the Security section of the README.
+--
+-- Migration path (future work, out of scope this sprint):
+--   Adopt Supabase Auth so requests carry a real JWT and auth.uid() resolves,
+--   connect from the browser with the anon key, THEN enable RLS and add
+--   per-table policies. Only after that does RLS provide real defense in depth.
