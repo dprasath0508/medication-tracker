@@ -21,7 +21,7 @@ from services.notifications import NotificationService
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+    init_session_state, current_user, sign_out, switch_to, invalidate_read_caches,
 )
 
 
@@ -125,6 +125,9 @@ def show_create_family_circle():
                 st.session_state.show_create_circle = False
                 st.session_state.circle_created = True
                 st.session_state.new_invite_code = invite_code
+                # Remember the patient we just created (if any) so the success
+                # screen's "Add Medications" can jump straight to their form.
+                st.session_state.new_patient_id = patient_id
                 st.rerun()
             else:
                 st.error("Please enter a family circle name.")
@@ -157,15 +160,24 @@ def show_circle_created_success():
 
     with col2:
         st.markdown("### Next Steps")
-        if st.button("Add Medications", key="add_first_med", use_container_width=True):
-            st.session_state.show_medication_setup = True
-            st.session_state.circle_created = False
-            st.rerun()
+        new_patient_id = st.session_state.get("new_patient_id")
+        if new_patient_id:
+            if st.button("Add Medications", key="add_first_med", use_container_width=True):
+                st.session_state.circle_created = False
+                # Set the session key the add-med page reads directly — query
+                # params do not reliably survive st.switch_page.
+                st.session_state["add_medication_for"] = new_patient_id
+                switch_to("add_med")
+        else:
+            st.caption(
+                "Add a patient to this circle (or share the invite code) to start "
+                "tracking medications."
+            )
 
         if st.button("Go to Dashboard", key="go_dashboard", use_container_width=True):
             st.session_state.circle_created = False
             st.session_state.onboarding_complete = True
-            st.rerun()
+            switch_to("dashboard")
 
 
 
@@ -220,6 +232,63 @@ def show_join_family_circle():
 
 
 
+def show_manage_caregivers():
+    """Let a circle creator grant/revoke manage_meds for other caregivers."""
+    from ui.primitives import page_shell, divider
+
+    db, _ = init_database()
+    user = current_user()
+
+    page_shell(
+        "Manage caregivers",
+        eyebrow="Family circle",
+        subtitle="Give a trusted family member permission to add and log medications.",
+    )
+
+    if st.button("Back", key="manage_back"):
+        st.session_state.pop("show_manage_circle", None)
+        switch_to("dashboard")
+
+    # Only circles this user created can have their permissions changed.
+    circles = [
+        c for c in db.get_user_family_circles(user["id"])
+        if c.get("created_by") == user["id"]
+    ]
+    if not circles:
+        st.info("You can only manage circles you created.")
+        return
+
+    for circle in circles:
+        st.markdown(f"### {circle['name']}")
+        members = db.get_family_circle_members(circle["id"])
+        # Patients aren't caregivers; the creator already has full access.
+        caregivers = [
+            m for m in members
+            if m["role"] != "patient" and m["id"] != user["id"]
+        ]
+        if not caregivers:
+            st.caption("No other caregivers yet. Share the invite code to add one.")
+            divider(4)
+            continue
+
+        for m in caregivers:
+            can_manage = "manage_meds" in m["permissions"]
+            new_val = st.checkbox(
+                f"{m['name']} can add and log medications",
+                value=can_manage,
+                key=f"manage_{circle['id']}_{m['id']}",
+            )
+            if new_val != can_manage:
+                try:
+                    db.set_member_manage_meds(user["id"], circle["id"], m["id"], new_val)
+                    invalidate_read_caches()
+                    st.toast(f"Updated {m['name']}'s access")
+                    st.rerun()
+                except PermissionError:
+                    st.error("Only the circle creator can change permissions.")
+        divider(4)
+
+
 def render() -> None:
     init_session_state()
     action = st.query_params.get("action")
@@ -227,5 +296,7 @@ def render() -> None:
         show_join_family_circle()
     elif st.session_state.get("circle_created"):
         show_circle_created_success()
+    elif action == "manage" or st.session_state.get("show_manage_circle"):
+        show_manage_caregivers()
     else:
         show_create_family_circle()

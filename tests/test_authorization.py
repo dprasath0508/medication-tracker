@@ -165,6 +165,100 @@ def test_system_caller_cannot_write(db, circle):
         db.log_dose(SYSTEM_CALLER, circle["patient"], "Aspirin", "08:00", True)
 
 
+# --- can_manage_patient: the non-raising check the UI gates write actions on -
+
+def test_can_manage_patient_true_for_self_and_manager_false_otherwise(db, circle):
+    """today.py / dashboard.py show write buttons only when this returns True.
+    It must agree exactly with the raising write check — same policy, no drift."""
+    caregiver, patient = circle["caregiver"], circle["patient"]
+    viewer, stranger = circle["viewer"], circle["stranger"]
+
+    assert db.can_manage_patient(patient, patient) is True      # self
+    assert db.can_manage_patient(caregiver, patient) is True    # has manage_meds
+    assert db.can_manage_patient(viewer, patient) is False      # view only
+    assert db.can_manage_patient(stranger, patient) is False    # no relationship
+    assert db.can_manage_patient(SYSTEM_CALLER, patient) is False  # system is read-only
+    assert db.can_manage_patient(None, patient) is False        # non-int identity
+
+
+# --- Circle creator grants/revokes manage_meds ------------------------------
+
+def test_creator_can_grant_and_revoke_manage_meds(db, circle):
+    """A promoted caregiver can write; revoking takes the ability away again."""
+    caregiver, patient, viewer = circle["caregiver"], circle["patient"], circle["viewer"]
+    circle_id = db.get_user_family_circles(caregiver)[0]["id"]
+
+    # Baseline: viewer joined with view-only, so cannot write.
+    assert db.can_manage_patient(viewer, patient) is False
+
+    assert db.set_member_manage_meds(caregiver, circle_id, viewer, True) is True
+    assert db.can_manage_patient(viewer, patient) is True
+    med_id = db.add_medication(viewer, patient, "Metformin", "500mg", "daily", ["08:00"])
+    assert med_id > 0
+
+    assert db.set_member_manage_meds(caregiver, circle_id, viewer, False) is True
+    assert db.can_manage_patient(viewer, patient) is False
+    with pytest.raises(AuthorizationError):
+        db.add_medication(viewer, patient, "Ibuprofen", "200mg", "daily", ["09:00"])
+
+
+def test_non_creator_cannot_change_permissions(db, circle):
+    caregiver, viewer = circle["caregiver"], circle["viewer"]
+    circle_id = db.get_user_family_circles(caregiver)[0]["id"]
+    # The viewer is a member but not the creator — must not self-promote.
+    with pytest.raises(PermissionError):
+        db.set_member_manage_meds(viewer, circle_id, viewer, True)
+
+
+def test_setting_permission_for_non_member_returns_false(db, circle):
+    caregiver, stranger = circle["caregiver"], circle["stranger"]
+    circle_id = db.get_user_family_circles(caregiver)[0]["id"]
+    assert db.set_member_manage_meds(caregiver, circle_id, stranger, True) is False
+
+
+# --- Medication edit / deactivate -------------------------------------------
+
+def test_manager_can_edit_and_deactivate_medication(db, circle):
+    caregiver, patient = circle["caregiver"], circle["patient"]
+    med_id = db.add_medication(caregiver, patient, "Metformin", "500mg", "daily", ["08:00"])
+
+    assert db.update_medication(caregiver, med_id, dosage="1000mg", times=["09:00"]) is True
+    (med,) = db.get_patient_medications(patient, patient)
+    assert med["dosage"] == "1000mg"
+    assert med["times"] == ["09:00"]
+    assert med["name"] == "Metformin"  # name is locked, never changes on edit
+
+    assert db.deactivate_medication(caregiver, med_id) is True
+    assert db.get_patient_medications(patient, patient) == []  # drops off the schedule
+
+
+def test_patient_can_edit_and_deactivate_own_medication(db):
+    solo = db.add_user("Solo Patient", email="solo2@example.com", role="patient")
+    med_id = db.add_medication(solo, solo, "Lisinopril", "10mg", "daily", ["08:00"])
+    assert db.update_medication(solo, med_id, notes="with breakfast") is True
+    assert db.deactivate_medication(solo, med_id) is True
+    assert db.get_patient_medications(solo, solo) == []
+
+
+def test_viewer_and_stranger_cannot_edit_or_deactivate(db, circle):
+    caregiver, patient = circle["caregiver"], circle["patient"]
+    med_id = db.add_medication(caregiver, patient, "Metformin", "500mg", "daily", ["08:00"])
+
+    for actor in (circle["viewer"], circle["stranger"]):
+        with pytest.raises(AuthorizationError):
+            db.update_medication(actor, med_id, dosage="1mg")
+        with pytest.raises(AuthorizationError):
+            db.deactivate_medication(actor, med_id)
+    (med,) = db.get_patient_medications(patient, patient)
+    assert med["dosage"] == "500mg"  # untouched and still active
+
+
+def test_editing_unknown_medication_returns_false(db, circle):
+    """A non-existent medication id is a no-op False, not an authz probe."""
+    assert db.update_medication(circle["stranger"], 999999, dosage="1mg") is False
+    assert db.deactivate_medication(circle["stranger"], 999999) is False
+
+
 # --- The caller is what gets recorded ---------------------------------------
 
 def test_dose_is_recorded_as_logged_by_the_caller(db, circle):

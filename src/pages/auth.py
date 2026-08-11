@@ -6,6 +6,7 @@ redesign against ``design-system/MASTER.md`` happens in Commit 4.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import time
 from datetime import datetime, timedelta
@@ -21,7 +22,7 @@ from services.notifications import NotificationService
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+    init_session_state, current_user, sign_out, persist_session_token,
 )
 
 
@@ -252,7 +253,7 @@ def show_otp_verification():
                     else:
                         # Existing user - log them in
                         user = result["user"]
-                        st.session_state.session_token = result["session_token"]
+                        persist_session_token(result["session_token"])
                         st.session_state.user_profile = {
                             "id": user["id"],
                             "name": user["name"],
@@ -378,7 +379,7 @@ def show_complete_profile():
 
                 if result["success"]:
                     user = result["user"]
-                    st.session_state.session_token = result["session_token"]
+                    persist_session_token(result["session_token"])
                     st.session_state.user_profile = {
                         "id": user["id"],
                         "name": user["name"],
@@ -443,7 +444,7 @@ def show_email_login():
 
                 if result["success"]:
                     user = result["user"]
-                    st.session_state.session_token = result["session_token"]
+                    persist_session_token(result["session_token"])
                     st.session_state.user_profile = {
                         "id": user["id"],
                         "name": user["name"],
@@ -648,7 +649,7 @@ def show_register_screen():
 
                         if result["success"]:
                             user = result["user"]
-                            st.session_state.session_token = result["session_token"]
+                            persist_session_token(result["session_token"])
                             st.session_state.user_profile = {
                                 "id": user["id"],
                                 "name": user["name"],
@@ -769,7 +770,7 @@ def show_profile_setup():
     """Show profile setup form."""
     user_type = st.session_state.get("user_type", "family_member")
 
-    st.markdown(f"# Set Up Your Profile")
+    st.markdown("# Set Up Your Profile")
     st.markdown(
         f"**Account Type:** {'Family Member' if user_type == 'family_member' else 'Patient'}"
     )

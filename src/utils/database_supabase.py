@@ -153,6 +153,34 @@ class MedicationDB(PatientAuthorizationMixin):
             members.append(member)
         return members
 
+    def get_family_circle(self, circle_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single family circle row (includes ``created_by``)."""
+        result = self.client.table('family_circles').select('*').eq('id', circle_id).execute()
+        return result.data[0] if result.data else None
+
+    def set_member_manage_meds(self, actor_id, circle_id: int, user_id: int,
+                               can_manage: bool) -> bool:
+        """Grant or revoke a member's ``manage_meds`` permission in a circle.
+
+        Only the circle's creator may change permissions — verified here, not
+        just in the UI. Raises ``PermissionError`` otherwise. Returns False if
+        the target is not a member of the circle.
+        """
+        circle = self.get_family_circle(circle_id)
+        if not circle or circle["created_by"] != actor_id:
+            raise PermissionError("Only the circle creator can change permissions")
+        result = self.client.table('family_members').select('permissions').eq(
+            'family_circle_id', circle_id
+        ).eq('user_id', user_id).execute()
+        if not result.data:
+            return False
+        perms = set(result.data[0]['permissions'] or [])
+        perms.add("manage_meds") if can_manage else perms.discard("manage_meds")
+        self.client.table('family_members').update(
+            {'permissions': sorted(perms)}
+        ).eq('family_circle_id', circle_id).eq('user_id', user_id).execute()
+        return True
+
     # AUTHORIZATION (see utils/authz.py — the single chokepoint)
     def _get_caller_permissions_for_patient(self, caller_id: int, patient_id: int) -> set:
         """Union of the caller's permissions across circles shared with the patient."""
@@ -209,6 +237,50 @@ class MedicationDB(PatientAuthorizationMixin):
             del med['users']
             medications.append(med)
         return medications
+
+    def _get_medication_patient_id(self, medication_id: int) -> Optional[int]:
+        """Resolve which patient a medication belongs to (for authorization)."""
+        result = self.client.table('medications').select('patient_id').eq('id', medication_id).execute()
+        return result.data[0]['patient_id'] if result.data else None
+
+    def update_medication(self, caller_id, medication_id: int, dosage: str = None,
+                          frequency: str = None, times: List[str] = None,
+                          notes: str = None) -> bool:
+        """Update an existing medication's dose/schedule/notes.
+
+        Name is intentionally not updatable: dose_logs reference the medication
+        by name, so a rename would detach history. Rename = deactivate + re-add.
+        Authorized against the medication's patient through the write chokepoint.
+        """
+        patient_id = self._get_medication_patient_id(medication_id)
+        if patient_id is None:
+            return False
+        self._assert_can_access_patient(caller_id, patient_id, "write")
+        updates = {}
+        if dosage is not None:
+            updates["dosage"] = dosage
+        if frequency is not None:
+            updates["frequency"] = frequency
+        if times is not None:
+            updates["times"] = times  # Supabase handles JSON natively
+        if notes is not None:
+            updates["notes"] = notes
+        if not updates:
+            return False
+        self.client.table('medications').update(updates).eq('id', medication_id).execute()
+        return True
+
+    def deactivate_medication(self, caller_id, medication_id: int) -> bool:
+        """Soft-delete a medication (active = False) so it drops off the schedule.
+
+        Past dose_logs are kept. Authorized through the write chokepoint.
+        """
+        patient_id = self._get_medication_patient_id(medication_id)
+        if patient_id is None:
+            return False
+        self._assert_can_access_patient(caller_id, patient_id, "write")
+        self.client.table('medications').update({'active': False}).eq('id', medication_id).execute()
+        return True
 
     def log_dose(self, caller_id, patient_id: int, medication_name: str, scheduled_time: str,
                  taken: bool, actual_time: str = None) -> int:

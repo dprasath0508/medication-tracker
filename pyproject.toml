@@ -1,0 +1,21 @@
+# Ruff config for the CI lint gate (HARDENING_SPRINT.md, Finding 6).
+
+[tool.ruff]
+target-version = "py311"  # match the README / CI runner
+# Vendored and generated trees are not ours to lint.
+extend-exclude = [".claude", "venv", ".pytest_cache", "data"]
+
+[tool.ruff.lint]
+# Enforce pyflakes (real correctness: undefined names, redefinitions, bad
+# f-strings) plus the E9 syntax-error rules. Style/formatting (E1-E7, line
+# length), import sorting (I), pyupgrade modernization (UP), and timezone
+# rules (DTZ) are intentionally OUT of scope this sprint — DTZ in particular
+# is the timezone-naive scheduling issue deliberately deferred to next sprint.
+select = ["E9", "F"]
+# Deferred, not endorsed — tracked as follow-up, kept out of this sprint's diff:
+#   F401 unused-import   — ~67 across the app; a broad import cleanup is its
+#                          own task and would bury the security diff.
+#   F841 unused-variable — the current hits are family-circle form fields that
+#                          are collected in the UI but not yet wired through to
+#                          create_family_circle: a feature gap, not hardening.
+ignore = ["F401", "F841"]

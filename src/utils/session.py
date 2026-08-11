@@ -80,6 +80,86 @@ def is_authenticated() -> bool:
     return current_user() is not None
 
 
+# ---------------------------------------------------------------------------
+# Persistent login
+#
+# Streamlit's session_state is per-connection and is wiped on a full browser
+# reload, but the auth token in ``user_sessions`` is durable server-side. We
+# stash the token in the URL (``?token=``) at login so a refresh can re-resolve
+# it here on boot, before the router decides which pages to show.
+#
+# The token lives in the URL rather than session_state alone because that is
+# the only place that survives a reload without adding a cookie component. It
+# is a 32-byte urlsafe secret with a 7-day server-side expiry that is
+# invalidated on sign-out; the same pattern the email-verify / reset links use.
+# ---------------------------------------------------------------------------
+
+TOKEN_PARAM = "token"
+
+
+def _profile_from_user(user: dict) -> dict:
+    """Map a DB user row to the session ``user_profile`` shape the pages expect."""
+    role = user.get("role", "patient")
+    return {
+        "id": user["id"],
+        "name": user["name"],
+        "email": user.get("email", ""),
+        "age": user.get("age"),
+        "type": role,
+        "phone": user.get("phone", ""),
+        "relationship": "patient" if role == "patient" else "family_member",
+        "theme": user.get("theme"),
+    }
+
+
+def persist_session_token(token: str) -> None:
+    """Record the auth token so the session survives a page refresh.
+
+    Call this at every successful login. Stores the token in session_state
+    (for this connection) and in the URL (so a reload can rehydrate it via
+    ``restore_session``).
+    """
+    st.session_state["session_token"] = token
+    if token:
+        st.query_params[TOKEN_PARAM] = token
+
+
+def restore_session() -> None:
+    """Rehydrate the signed-in user from a persisted token. Idempotent.
+
+    No-op if a profile is already loaded for this connection. Otherwise resolves
+    ``?token=`` (or a token already in session_state) against the auth service
+    and repopulates ``user_profile``. A stale/expired token is cleared so we
+    don't loop on a dead param.
+    """
+    if st.session_state.get("user_profile") is not None:
+        return
+
+    token = st.session_state.get("session_token") or st.query_params.get(TOKEN_PARAM)
+    if not token:
+        return
+
+    user = _auth_service_singleton().validate_session(token)
+    if not user:
+        st.query_params.pop(TOKEN_PARAM, None)
+        st.session_state["session_token"] = None
+        return
+
+    st.session_state["session_token"] = token
+    st.session_state["user_profile"] = _profile_from_user(user)
+    st.query_params[TOKEN_PARAM] = token
+
+    if st.session_state.get("theme") is None and user.get("theme"):
+        st.session_state["theme"] = user["theme"]
+
+    try:
+        circles = _db_singleton().get_user_family_circles(user["id"])
+        st.session_state["onboarding_complete"] = len(circles) > 0
+    except Exception:
+        # Best effort — a dashboard/onboarding read failing must not block login.
+        pass
+
+
 def switch_to(page_key: str) -> None:
     """Switch to a page from the registry web_app builds each run.
 
@@ -100,6 +180,9 @@ def sign_out() -> None:
             auth_service().logout(token)
         except Exception:
             pass
+    # Drop the persisted token from the URL so a post-logout refresh does not
+    # silently sign the user back in on a still-valid token.
+    st.query_params.pop(TOKEN_PARAM, None)
     for key in list(st.session_state.keys()):
         if key in {"theme"}:
             continue

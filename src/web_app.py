@@ -27,7 +27,7 @@ load_dotenv()
 
 from ui import theme
 from ui.icons import icon
-from utils.session import current_user, init_session_state, sign_out
+from utils.session import current_user, init_session_state, restore_session, sign_out
 
 from pages import (
     auth as auth_page,
@@ -64,6 +64,10 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 theme.inject()
 init_session_state()
+
+# Rehydrate a signed-in user from a persisted ?token= after a browser refresh,
+# before the router or sidebar read current_user(). No-op if already signed in.
+restore_session()
 
 # Hydrate theme from the persisted user profile if we don't have one for this session.
 if st.session_state.get("theme") is None:

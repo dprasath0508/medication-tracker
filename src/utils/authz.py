@@ -78,3 +78,17 @@ class PatientAuthorizationMixin:
         permissions = self._get_caller_permissions_for_patient(caller_id, patient_id)
         if _LEVEL_PERMISSION[level] not in permissions:
             raise AuthorizationError(caller_id, patient_id, level)
+
+    def can_manage_patient(self, caller_id, patient_id) -> bool:
+        """Non-raising form of the ``write`` check, for the UI layer.
+
+        Pages call this to hide write actions a caller can't perform, instead
+        of rendering a button that raises :class:`AuthorizationError` when
+        clicked. It defers entirely to ``_assert_can_access_patient`` — there
+        is no second policy to keep in sync, and no bypass.
+        """
+        try:
+            self._assert_can_access_patient(caller_id, patient_id, "write")
+            return True
+        except AuthorizationError:
+            return False

@@ -21,7 +21,7 @@ from services.notifications import NotificationService
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+    init_session_state, current_user, sign_out, switch_to,
 )
 
 
@@ -66,16 +66,17 @@ def show_getting_started():
             if st.button(
                 "Create Family Circle", key="create_circle", use_container_width=True
             ):
-                st.session_state.show_create_circle = True
-                st.rerun()
+                switch_to("circle")
 
             st.markdown("**OR**")
 
             if st.button(
                 "Join Existing Circle", key="join_circle", use_container_width=True
             ):
-                st.session_state.show_join_circle = True
-                st.rerun()
+                # Set the session flag the circle page reads directly — query
+                # params do not reliably survive st.switch_page.
+                st.session_state["show_join_circle"] = True
+                switch_to("circle")
 
     else:  # patient
         st.markdown("## Set Up Your Medication Profile")
@@ -97,8 +98,12 @@ def show_getting_started():
             if st.button(
                 "Add My Medications", key="add_medications", use_container_width=True
             ):
-                st.session_state.show_add_patient_medication = True
-                st.rerun()
+                # A patient adds meds for themselves. Set the session key the
+                # add-med page reads (query params don't reliably survive
+                # st.switch_page); show_add_medication still authorizes the
+                # caller against this id via the data-layer chokepoint.
+                st.session_state["add_medication_for"] = user["id"]
+                switch_to("add_med")
 
             st.markdown("**OR**")
 
@@ -107,8 +112,8 @@ def show_getting_started():
                 key="connect_family",
                 use_container_width=True,
             ):
-                st.session_state.show_join_circle = True
-                st.rerun()
+                st.session_state["show_join_circle"] = True
+                switch_to("circle")
 
 
 

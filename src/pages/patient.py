@@ -21,7 +21,7 @@ from utils.authz import AuthorizationError
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out, switch_to,
+    init_session_state, current_user, sign_out, switch_to, invalidate_read_caches,
 )
 
 
@@ -69,7 +69,9 @@ def show_patient_details():
 
     if st.button("Back to dashboard", key="patient_back"):
         st.session_state.pop("selected_patient", None)
-        st.query_params.clear()
+        # Drop only our own routing param — clearing all of them would also
+        # wipe the persisted ?token= and sign the user out on next refresh.
+        st.query_params.pop("id", None)
         switch_to("dashboard")
 
         # Create adherence chart
@@ -143,6 +145,72 @@ def show_patient_details():
         st.dataframe(df, use_container_width=True)
     else:
         st.info("No medications scheduled for this patient yet.")
+
+    # Manage medications — only for callers who can write for this patient.
+    if medications and db.can_manage_patient(user["id"], patient_id):
+        _render_medication_management(db, user, patient_id, medications)
+
+
+def _render_medication_management(db, user, patient_id: int, medications: list) -> None:
+    """Per-medication edit (dose/schedule/notes) and deactivate, for writers.
+
+    Name is not editable here by design — dose history keys off it, so a rename
+    would orphan past logs. Renaming means deactivate + add again.
+    """
+    st.markdown("## Manage medications")
+    st.caption("Edit dose, schedule, or notes. To rename, deactivate and add it again.")
+
+    freq_options = ["daily", "twice_daily", "three_times_daily", "as_needed"]
+
+    for med in medications:
+        with st.expander(f"{med['name']} — {med['dosage']}"):
+            with st.form(f"edit_med_{med['id']}"):
+                dosage = st.text_input("Dosage", value=med["dosage"], key=f"dose_{med['id']}")
+                freq_index = (
+                    freq_options.index(med["frequency"])
+                    if med.get("frequency") in freq_options else 0
+                )
+                frequency = st.selectbox(
+                    "Frequency", freq_options, index=freq_index, key=f"freq_{med['id']}"
+                )
+
+                new_times = []
+                for i, t in enumerate(med["times"]):
+                    try:
+                        default_t = datetime.strptime(t, "%H:%M").time()
+                    except (ValueError, TypeError):
+                        default_t = datetime.strptime("08:00", "%H:%M").time()
+                    picked = st.time_input(
+                        f"Dose time {i + 1}", value=default_t, key=f"time_{med['id']}_{i}"
+                    )
+                    new_times.append(picked.strftime("%H:%M"))
+
+                notes = st.text_area("Notes", value=med.get("notes") or "", key=f"notes_{med['id']}")
+
+                if st.form_submit_button("Save changes", type="primary"):
+                    try:
+                        db.update_medication(
+                            user["id"], med["id"],
+                            dosage=dosage, frequency=frequency,
+                            times=new_times, notes=notes,
+                        )
+                    except AuthorizationError:
+                        st.error("You don't have permission to edit this medication.")
+                    else:
+                        invalidate_read_caches()
+                        st.toast(f"Updated {med['name']}")
+                        st.rerun()
+
+            # Deactivate is a plain button (not a form submit) so it acts on click.
+            if st.button("Deactivate", key=f"deact_{med['id']}"):
+                try:
+                    db.deactivate_medication(user["id"], med["id"])
+                except AuthorizationError:
+                    st.error("You don't have permission to deactivate this medication.")
+                else:
+                    invalidate_read_caches()
+                    st.toast(f"Deactivated {med['name']}")
+                    st.rerun()
 
 
 

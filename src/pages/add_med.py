@@ -70,7 +70,9 @@ def show_add_medication():
 
     if st.button("Back to dashboard", key="addmed_back"):
         st.session_state.pop("add_medication_for", None)
-        st.query_params.clear()
+        # Drop only our own routing param — clearing all of them would also
+        # wipe the persisted ?token= and sign the user out on next refresh.
+        st.query_params.pop("patient", None)
         switch_to("dashboard")
 
     with st.form("add_medication_form"):
