@@ -259,6 +259,47 @@ def test_editing_unknown_medication_returns_false(db, circle):
     assert db.deactivate_medication(circle["stranger"], 999999) is False
 
 
+# --- Inactive medications: view + reactivate ---------------------------------
+
+def test_manager_can_view_and_reactivate_inactive_medication(db, circle):
+    caregiver, patient = circle["caregiver"], circle["patient"]
+    med_id = db.add_medication(caregiver, patient, "Metformin", "500mg", "daily", ["08:00"])
+    db.deactivate_medication(caregiver, med_id)
+
+    inactive = db.get_inactive_medications(caregiver, patient)
+    assert [m["name"] for m in inactive] == ["Metformin"]
+    assert db.get_patient_medications(patient, patient) == []  # not on the active list
+
+    assert db.reactivate_medication(caregiver, med_id) is True
+    assert [m["name"] for m in db.get_patient_medications(patient, patient)] == ["Metformin"]
+    assert db.get_inactive_medications(caregiver, patient) == []  # no longer inactive
+
+
+def test_viewer_can_see_inactive_but_cannot_reactivate(db, circle):
+    caregiver, patient, viewer = circle["caregiver"], circle["patient"], circle["viewer"]
+    med_id = db.add_medication(caregiver, patient, "Metformin", "500mg", "daily", ["08:00"])
+    db.deactivate_medication(caregiver, med_id)
+
+    assert [m["name"] for m in db.get_inactive_medications(viewer, patient)] == ["Metformin"]
+    with pytest.raises(AuthorizationError):
+        db.reactivate_medication(viewer, med_id)
+
+
+def test_stranger_cannot_view_inactive_or_reactivate(db, circle):
+    caregiver, patient, stranger = circle["caregiver"], circle["patient"], circle["stranger"]
+    med_id = db.add_medication(caregiver, patient, "Metformin", "500mg", "daily", ["08:00"])
+    db.deactivate_medication(caregiver, med_id)
+
+    with pytest.raises(AuthorizationError):
+        db.get_inactive_medications(stranger, patient)
+    with pytest.raises(AuthorizationError):
+        db.reactivate_medication(stranger, med_id)
+
+
+def test_reactivating_unknown_medication_returns_false(db, circle):
+    assert db.reactivate_medication(circle["caregiver"], 999999) is False
+
+
 # --- The caller is what gets recorded ---------------------------------------
 
 def test_dose_is_recorded_as_logged_by_the_caller(db, circle):

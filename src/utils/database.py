@@ -443,6 +443,34 @@ class MedicationDB(PatientAuthorizationMixin):
             conn.execute("UPDATE medications SET active = 0 WHERE id = ?", (medication_id,))
         return True
 
+    def get_inactive_medications(self, caller_id, patient_id: int) -> List[Dict[str, Any]]:
+        """Get deactivated (active = 0) medications for a patient (read access)."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT m.*, u.name as managed_by_name
+                FROM medications m
+                LEFT JOIN users u ON m.managed_by = u.id
+                WHERE m.patient_id = ? AND m.active = 0
+            """, (patient_id,))
+            medications = []
+            for row in cursor.fetchall():
+                med = dict(row)
+                med['times'] = json.loads(med['times'])
+                medications.append(med)
+            return medications
+
+    def reactivate_medication(self, caller_id, medication_id: int) -> bool:
+        """Restore a soft-deleted medication (active = 1). Write chokepoint."""
+        patient_id = self._get_medication_patient_id(medication_id)
+        if patient_id is None:
+            return False
+        self._assert_can_access_patient(caller_id, patient_id, "write")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE medications SET active = 1 WHERE id = ?", (medication_id,))
+        return True
+
     def log_dose(self, caller_id, patient_id: int, medication_name: str, scheduled_time: str, taken: bool, actual_time: str = None) -> int:
         """Log a dose taken/missed. The caller is recorded as the logger."""
         self._assert_can_access_patient(caller_id, patient_id, "write")

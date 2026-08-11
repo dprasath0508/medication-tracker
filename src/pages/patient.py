@@ -147,20 +147,26 @@ def show_patient_details():
         st.info("No medications scheduled for this patient yet.")
 
     # Manage medications — only for callers who can write for this patient.
-    if medications and db.can_manage_patient(user["id"], patient_id):
-        _render_medication_management(db, user, patient_id, medications)
+    if db.can_manage_patient(user["id"], patient_id):
+        inactive_meds = db.get_inactive_medications(user["id"], patient_id)
+        if medications or inactive_meds:
+            _render_medication_management(db, user, patient_id, medications, inactive_meds)
 
 
-def _render_medication_management(db, user, patient_id: int, medications: list) -> None:
-    """Per-medication edit (dose/schedule/notes) and deactivate, for writers.
+def _render_medication_management(db, user, patient_id: int, medications: list,
+                                  inactive_meds: list) -> None:
+    """Per-medication edit (dose/schedule/notes), deactivate, and reactivate.
 
-    Name is not editable here by design — dose history keys off it, so a rename
-    would orphan past logs. Renaming means deactivate + add again.
+    Writers only. Name is not editable here by design — dose history keys off
+    it, so a rename would orphan past logs. Renaming means deactivate + add
+    again.
     """
     st.markdown("## Manage medications")
-    st.caption("Edit dose, schedule, or notes. To rename, deactivate and add it again.")
 
     freq_options = ["daily", "twice_daily", "three_times_daily", "as_needed"]
+
+    if medications:
+        st.caption("Edit dose, schedule, or notes. To rename, deactivate and add it again.")
 
     for med in medications:
         with st.expander(f"{med['name']} — {med['dosage']}"):
@@ -211,6 +217,24 @@ def _render_medication_management(db, user, patient_id: int, medications: list) 
                     invalidate_read_caches()
                     st.toast(f"Deactivated {med['name']}")
                     st.rerun()
+
+    if inactive_meds:
+        st.markdown("### Inactive medications")
+        st.caption("Deactivated meds are kept here. Reactivate to put one back on the schedule.")
+        for med in inactive_meds:
+            cols = st.columns([3, 1])
+            with cols[0]:
+                st.markdown(f"**{med['name']}** — {med['dosage']}")
+            with cols[1]:
+                if st.button("Reactivate", key=f"react_{med['id']}"):
+                    try:
+                        db.reactivate_medication(user["id"], med["id"])
+                    except AuthorizationError:
+                        st.error("You don't have permission to reactivate this medication.")
+                    else:
+                        invalidate_read_caches()
+                        st.toast(f"Reactivated {med['name']}")
+                        st.rerun()
 
 
 
