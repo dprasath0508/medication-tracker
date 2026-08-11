@@ -391,6 +391,58 @@ class MedicationDB(PatientAuthorizationMixin):
                 medications.append(med)
             return medications
     
+    def _get_medication_patient_id(self, medication_id: int) -> Optional[int]:
+        """Resolve which patient a medication belongs to (for authorization)."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute("SELECT patient_id FROM medications WHERE id = ?", (medication_id,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def update_medication(self, caller_id, medication_id: int, dosage: str = None,
+                          frequency: str = None, times: List[str] = None,
+                          notes: str = None) -> bool:
+        """Update an existing medication's dose/schedule/notes.
+
+        Name is intentionally not updatable: dose_logs reference the medication
+        by name, so a rename would detach history. Rename = deactivate + re-add.
+        Authorized against the medication's patient through the write chokepoint.
+        """
+        patient_id = self._get_medication_patient_id(medication_id)
+        if patient_id is None:
+            return False
+        self._assert_can_access_patient(caller_id, patient_id, "write")
+        updates = {}
+        if dosage is not None:
+            updates["dosage"] = dosage
+        if frequency is not None:
+            updates["frequency"] = frequency
+        if times is not None:
+            updates["times"] = json.dumps(times)
+        if notes is not None:
+            updates["notes"] = notes
+        if not updates:
+            return False
+        fields = ", ".join(f"{k} = ?" for k in updates)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                f"UPDATE medications SET {fields} WHERE id = ?",
+                list(updates.values()) + [medication_id],
+            )
+        return True
+
+    def deactivate_medication(self, caller_id, medication_id: int) -> bool:
+        """Soft-delete a medication (active = 0) so it drops off the schedule.
+
+        Past dose_logs are kept. Authorized through the write chokepoint.
+        """
+        patient_id = self._get_medication_patient_id(medication_id)
+        if patient_id is None:
+            return False
+        self._assert_can_access_patient(caller_id, patient_id, "write")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE medications SET active = 0 WHERE id = ?", (medication_id,))
+        return True
+
     def log_dose(self, caller_id, patient_id: int, medication_name: str, scheduled_time: str, taken: bool, actual_time: str = None) -> int:
         """Log a dose taken/missed. The caller is recorded as the logger."""
         self._assert_can_access_patient(caller_id, patient_id, "write")
