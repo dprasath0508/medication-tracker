@@ -56,11 +56,12 @@ def render() -> None:
         cols = st.columns([1, 1])
         with cols[0]:
             if st.button("Create a circle", key="dash_create", type="primary", use_container_width=True):
-                st.query_params["action"] = "create"
                 switch_to("circle")
         with cols[1]:
             if st.button("Join a circle", key="dash_join", use_container_width=True):
-                st.query_params["action"] = "join"
+                # Set the session flag the circle page reads directly — query
+                # params do not reliably survive st.switch_page.
+                st.session_state["show_join_circle"] = True
                 switch_to("circle")
         return
 
@@ -73,15 +74,16 @@ def render() -> None:
             "No patients yet",
             "Add someone to a circle to start tracking their medications.",
         )
+        # Adding a patient happens through the circle screen, which is the only
+        # place that creates a patient row (via "add a patient now").
         if st.button("Add a patient", key="dash_add_patient", type="primary"):
-            st.session_state["show_add_patient"] = True
-            st.rerun()
+            switch_to("circle")
         return
 
     _render_metrics(data)
     divider(5)
     _render_alerts(data)
-    _render_patient_grid(db, data)
+    _render_patient_grid(db, data, user["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -159,13 +161,16 @@ def _render_alerts(data: dict) -> None:
     divider(5)
 
 
-def _render_patient_grid(db, data: dict) -> None:
+def _render_patient_grid(db, data: dict, caller_id: int) -> None:
     st.markdown('<h2 style="margin-top: var(--space-6);">Patients</h2>', unsafe_allow_html=True)
     stack_open()
     for p in data["patients_status"]:
         adherence = p["adherence_rate"]
         pill_kind = "success" if adherence >= 90 else "warning" if adherence >= 70 else "error"
         adh_display = f"{adherence:.0f}% adherence" if adherence > 0 else "No data yet"
+        # Only offer write actions (add med, log doses) to a caller who holds
+        # manage_meds for this patient. A view-only member sees just "View".
+        can_write = db.can_manage_patient(caller_id, p["id"])
         st.markdown(
             f"""
             <div class="med-card">
@@ -182,17 +187,22 @@ def _render_patient_grid(db, data: dict) -> None:
             """,
             unsafe_allow_html=True,
         )
-        cols = st.columns([1, 1, 1])
-        with cols[0]:
+        if can_write:
+            cols = st.columns([1, 1, 1])
+            with cols[0]:
+                if st.button("View", key=f"view_{p['id']}", use_container_width=True):
+                    st.query_params["id"] = str(p["id"])
+                    switch_to("patient")
+            with cols[1]:
+                if st.button("Add med", key=f"addmed_{p['id']}", use_container_width=True):
+                    st.query_params["patient"] = str(p["id"])
+                    switch_to("add_med")
+            with cols[2]:
+                if st.button("Log today", key=f"logtoday_{p['id']}", type="primary", use_container_width=True):
+                    switch_to("today")
+        else:
             if st.button("View", key=f"view_{p['id']}", use_container_width=True):
                 st.query_params["id"] = str(p["id"])
                 switch_to("patient")
-        with cols[1]:
-            if st.button("Add med", key=f"addmed_{p['id']}", use_container_width=True):
-                st.query_params["patient"] = str(p["id"])
-                switch_to("add_med")
-        with cols[2]:
-            if st.button("Log today", key=f"logtoday_{p['id']}", type="primary", use_container_width=True):
-                switch_to("today")
         divider(3)
     stack_close()

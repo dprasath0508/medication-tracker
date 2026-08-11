@@ -19,6 +19,7 @@ from ui.primitives import (
     stack_open,
     stack_close,
 )
+from utils.authz import AuthorizationError
 from utils.session import (
     db as _db,
     current_user,
@@ -68,6 +69,11 @@ def render() -> None:
 
     doses = _build_doses(db, user, patient_id, medications)
 
+    # A caller may see a patient's day (view) without being able to log doses
+    # for them (manage_meds). Resolve once and let the cards render read-only
+    # rather than offering a button that would raise on click.
+    can_write = db.can_manage_patient(user["id"], patient_id)
+
     total = len(doses)
     taken = sum(1 for d in doses if d["existing_log"] and d["existing_log"][0])
     percent = (taken / total) if total else 0.0
@@ -92,7 +98,7 @@ def render() -> None:
     # Per-dose cards
     stack_open()
     for dose in doses:
-        _render_dose_card(db, user, patient_id, dose)
+        _render_dose_card(db, user, patient_id, dose, can_write)
     stack_close()
 
 
@@ -169,7 +175,7 @@ def _lookup_dose_log(db, caller_id: int, patient_id: int, med_name: str, schedul
     return cached_dose_log(caller_id, patient_id, med_name, scheduled, date)
 
 
-def _render_dose_card(db, user, patient_id: int, dose: dict) -> None:
+def _render_dose_card(db, user, patient_id: int, dose: dict, can_write: bool) -> None:
     med = dose["medication"]
     med_time = dose["scheduled_time"]
     display_time = dose["display_time"]
@@ -226,6 +232,15 @@ def _render_dose_card(db, user, patient_id: int, dose: dict) -> None:
             + "</div>",
             unsafe_allow_html=True,
         )
+    elif not can_write:
+        # View-only caller (e.g. a family member with 'view' but not
+        # 'manage_meds'): show the dose but no actions it can't perform.
+        st.markdown(
+            '<div style="margin: calc(-1 * var(--space-5)) 0 var(--space-3) 0; text-align: right;">'
+            + status_pill("View only", "muted")
+            + "</div>",
+            unsafe_allow_html=True,
+        )
     else:
         cols = st.columns([1, 1])
         with cols[0]:
@@ -235,14 +250,20 @@ def _render_dose_card(db, user, patient_id: int, dose: dict) -> None:
                 use_container_width=True,
                 type="primary",
             ):
-                db.log_dose(
-                    user["id"],
-                    patient_id,
-                    med["name"],
-                    med_time,
-                    True,
-                    datetime.now().strftime("%H:%M"),
-                )
+                try:
+                    db.log_dose(
+                        user["id"],
+                        patient_id,
+                        med["name"],
+                        med_time,
+                        True,
+                        datetime.now().strftime("%H:%M"),
+                    )
+                except AuthorizationError:
+                    # Backstop: permissions could have been revoked between
+                    # render and click. Never surface a raw exception page.
+                    st.error("You don't have permission to log doses for this patient.")
+                    return
                 invalidate_read_caches()
                 st.rerun()
         with cols[1]:

@@ -165,6 +165,22 @@ def test_system_caller_cannot_write(db, circle):
         db.log_dose(SYSTEM_CALLER, circle["patient"], "Aspirin", "08:00", True)
 
 
+# --- can_manage_patient: the non-raising check the UI gates write actions on -
+
+def test_can_manage_patient_true_for_self_and_manager_false_otherwise(db, circle):
+    """today.py / dashboard.py show write buttons only when this returns True.
+    It must agree exactly with the raising write check — same policy, no drift."""
+    caregiver, patient = circle["caregiver"], circle["patient"]
+    viewer, stranger = circle["viewer"], circle["stranger"]
+
+    assert db.can_manage_patient(patient, patient) is True      # self
+    assert db.can_manage_patient(caregiver, patient) is True    # has manage_meds
+    assert db.can_manage_patient(viewer, patient) is False      # view only
+    assert db.can_manage_patient(stranger, patient) is False    # no relationship
+    assert db.can_manage_patient(SYSTEM_CALLER, patient) is False  # system is read-only
+    assert db.can_manage_patient(None, patient) is False        # non-int identity
+
+
 # --- The caller is what gets recorded ---------------------------------------
 
 def test_dose_is_recorded_as_logged_by_the_caller(db, circle):
