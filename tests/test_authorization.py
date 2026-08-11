@@ -181,6 +181,41 @@ def test_can_manage_patient_true_for_self_and_manager_false_otherwise(db, circle
     assert db.can_manage_patient(None, patient) is False        # non-int identity
 
 
+# --- Circle creator grants/revokes manage_meds ------------------------------
+
+def test_creator_can_grant_and_revoke_manage_meds(db, circle):
+    """A promoted caregiver can write; revoking takes the ability away again."""
+    caregiver, patient, viewer = circle["caregiver"], circle["patient"], circle["viewer"]
+    circle_id = db.get_user_family_circles(caregiver)[0]["id"]
+
+    # Baseline: viewer joined with view-only, so cannot write.
+    assert db.can_manage_patient(viewer, patient) is False
+
+    assert db.set_member_manage_meds(caregiver, circle_id, viewer, True) is True
+    assert db.can_manage_patient(viewer, patient) is True
+    med_id = db.add_medication(viewer, patient, "Metformin", "500mg", "daily", ["08:00"])
+    assert med_id > 0
+
+    assert db.set_member_manage_meds(caregiver, circle_id, viewer, False) is True
+    assert db.can_manage_patient(viewer, patient) is False
+    with pytest.raises(AuthorizationError):
+        db.add_medication(viewer, patient, "Ibuprofen", "200mg", "daily", ["09:00"])
+
+
+def test_non_creator_cannot_change_permissions(db, circle):
+    caregiver, viewer = circle["caregiver"], circle["viewer"]
+    circle_id = db.get_user_family_circles(caregiver)[0]["id"]
+    # The viewer is a member but not the creator — must not self-promote.
+    with pytest.raises(PermissionError):
+        db.set_member_manage_meds(viewer, circle_id, viewer, True)
+
+
+def test_setting_permission_for_non_member_returns_false(db, circle):
+    caregiver, stranger = circle["caregiver"], circle["stranger"]
+    circle_id = db.get_user_family_circles(caregiver)[0]["id"]
+    assert db.set_member_manage_meds(caregiver, circle_id, stranger, True) is False
+
+
 # --- The caller is what gets recorded ---------------------------------------
 
 def test_dose_is_recorded_as_logged_by_the_caller(db, circle):

@@ -65,6 +65,12 @@ def render() -> None:
                 switch_to("circle")
         return
 
+    # Circle creators can promote a second caregiver to write access.
+    if any(c.get("created_by") == user["id"] for c in circles):
+        if st.button("Manage caregivers", key="dash_manage_caregivers"):
+            st.session_state["show_manage_circle"] = True
+            switch_to("circle")
+
     data = family_manager.get_family_dashboard_data(user["id"])
 
     if data["total_patients"] == 0:

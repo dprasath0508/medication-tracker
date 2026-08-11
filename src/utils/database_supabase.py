@@ -153,6 +153,34 @@ class MedicationDB(PatientAuthorizationMixin):
             members.append(member)
         return members
 
+    def get_family_circle(self, circle_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single family circle row (includes ``created_by``)."""
+        result = self.client.table('family_circles').select('*').eq('id', circle_id).execute()
+        return result.data[0] if result.data else None
+
+    def set_member_manage_meds(self, actor_id, circle_id: int, user_id: int,
+                               can_manage: bool) -> bool:
+        """Grant or revoke a member's ``manage_meds`` permission in a circle.
+
+        Only the circle's creator may change permissions — verified here, not
+        just in the UI. Raises ``PermissionError`` otherwise. Returns False if
+        the target is not a member of the circle.
+        """
+        circle = self.get_family_circle(circle_id)
+        if not circle or circle["created_by"] != actor_id:
+            raise PermissionError("Only the circle creator can change permissions")
+        result = self.client.table('family_members').select('permissions').eq(
+            'family_circle_id', circle_id
+        ).eq('user_id', user_id).execute()
+        if not result.data:
+            return False
+        perms = set(result.data[0]['permissions'] or [])
+        perms.add("manage_meds") if can_manage else perms.discard("manage_meds")
+        self.client.table('family_members').update(
+            {'permissions': sorted(perms)}
+        ).eq('family_circle_id', circle_id).eq('user_id', user_id).execute()
+        return True
+
     # AUTHORIZATION (see utils/authz.py — the single chokepoint)
     def _get_caller_permissions_for_patient(self, caller_id: int, patient_id: int) -> set:
         """Union of the caller's permissions across circles shared with the patient."""

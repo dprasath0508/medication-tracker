@@ -304,6 +304,41 @@ class MedicationDB(PatientAuthorizationMixin):
                 members.append(member)
             return members
     
+    def get_family_circle(self, circle_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single family circle row (includes ``created_by``)."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("SELECT * FROM family_circles WHERE id = ?", (circle_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def set_member_manage_meds(self, actor_id: int, circle_id: int, user_id: int,
+                               can_manage: bool) -> bool:
+        """Grant or revoke a member's ``manage_meds`` permission in a circle.
+
+        Only the circle's creator may change permissions — verified here, not
+        just in the UI. Raises ``PermissionError`` otherwise. Returns False if
+        the target is not a member of the circle.
+        """
+        circle = self.get_family_circle(circle_id)
+        if not circle or circle["created_by"] != actor_id:
+            raise PermissionError("Only the circle creator can change permissions")
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                "SELECT permissions FROM family_members WHERE family_circle_id = ? AND user_id = ?",
+                (circle_id, user_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+            perms = set(json.loads(row[0]))
+            perms.add("manage_meds") if can_manage else perms.discard("manage_meds")
+            conn.execute(
+                "UPDATE family_members SET permissions = ? WHERE family_circle_id = ? AND user_id = ?",
+                (json.dumps(sorted(perms)), circle_id, user_id),
+            )
+            return True
+
     # AUTHORIZATION (see utils/authz.py — the single chokepoint)
     def _get_caller_permissions_for_patient(self, caller_id: int, patient_id: int) -> set:
         """Union of the caller's permissions across circles shared with the patient."""
