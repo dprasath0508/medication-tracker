@@ -22,7 +22,7 @@ from services.notifications import NotificationService
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+    init_session_state, current_user, sign_out, persist_session_token,
 )
 
 
@@ -253,7 +253,7 @@ def show_otp_verification():
                     else:
                         # Existing user - log them in
                         user = result["user"]
-                        st.session_state.session_token = result["session_token"]
+                        persist_session_token(result["session_token"])
                         st.session_state.user_profile = {
                             "id": user["id"],
                             "name": user["name"],
@@ -379,7 +379,7 @@ def show_complete_profile():
 
                 if result["success"]:
                     user = result["user"]
-                    st.session_state.session_token = result["session_token"]
+                    persist_session_token(result["session_token"])
                     st.session_state.user_profile = {
                         "id": user["id"],
                         "name": user["name"],
@@ -444,7 +444,7 @@ def show_email_login():
 
                 if result["success"]:
                     user = result["user"]
-                    st.session_state.session_token = result["session_token"]
+                    persist_session_token(result["session_token"])
                     st.session_state.user_profile = {
                         "id": user["id"],
                         "name": user["name"],
@@ -649,7 +649,7 @@ def show_register_screen():
 
                         if result["success"]:
                             user = result["user"]
-                            st.session_state.session_token = result["session_token"]
+                            persist_session_token(result["session_token"])
                             st.session_state.user_profile = {
                                 "id": user["id"],
                                 "name": user["name"],

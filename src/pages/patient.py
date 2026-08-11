@@ -69,7 +69,9 @@ def show_patient_details():
 
     if st.button("Back to dashboard", key="patient_back"):
         st.session_state.pop("selected_patient", None)
-        st.query_params.clear()
+        # Drop only our own routing param — clearing all of them would also
+        # wipe the persisted ?token= and sign the user out on next refresh.
+        st.query_params.pop("id", None)
         switch_to("dashboard")
 
         # Create adherence chart

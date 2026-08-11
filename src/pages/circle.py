@@ -21,7 +21,7 @@ from services.notifications import NotificationService
 from utils.session import (
     db as _db, family_manager as _family_manager,
     auth_service as _auth_service, notification_service as _notification_service,
-    init_session_state, current_user, sign_out,
+    init_session_state, current_user, sign_out, switch_to,
 )
 
 
@@ -125,6 +125,9 @@ def show_create_family_circle():
                 st.session_state.show_create_circle = False
                 st.session_state.circle_created = True
                 st.session_state.new_invite_code = invite_code
+                # Remember the patient we just created (if any) so the success
+                # screen's "Add Medications" can jump straight to their form.
+                st.session_state.new_patient_id = patient_id
                 st.rerun()
             else:
                 st.error("Please enter a family circle name.")
@@ -157,15 +160,24 @@ def show_circle_created_success():
 
     with col2:
         st.markdown("### Next Steps")
-        if st.button("Add Medications", key="add_first_med", use_container_width=True):
-            st.session_state.show_medication_setup = True
-            st.session_state.circle_created = False
-            st.rerun()
+        new_patient_id = st.session_state.get("new_patient_id")
+        if new_patient_id:
+            if st.button("Add Medications", key="add_first_med", use_container_width=True):
+                st.session_state.circle_created = False
+                # Set the session key the add-med page reads directly — query
+                # params do not reliably survive st.switch_page.
+                st.session_state["add_medication_for"] = new_patient_id
+                switch_to("add_med")
+        else:
+            st.caption(
+                "Add a patient to this circle (or share the invite code) to start "
+                "tracking medications."
+            )
 
         if st.button("Go to Dashboard", key="go_dashboard", use_container_width=True):
             st.session_state.circle_created = False
             st.session_state.onboarding_complete = True
-            st.rerun()
+            switch_to("dashboard")
 
 
 
