@@ -154,6 +154,20 @@ CREATE TABLE IF NOT EXISTS login_attempts (
     lockout_until TIMESTAMPTZ
 );
 
+-- Reminder-engine ledger: one row per (dose, stage) sent or superseded.
+-- The UNIQUE constraint makes the engine safe to run every minute and across
+-- restarts (see REMINDER_ENGINE.md).
+CREATE TABLE IF NOT EXISTS notification_log (
+    id BIGSERIAL PRIMARY KEY,
+    patient_id BIGINT REFERENCES users(id),
+    medication_name TEXT,
+    scheduled_time TEXT,
+    date DATE,
+    stage TEXT,
+    sent_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(patient_id, medication_name, scheduled_time, date, stage)
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
@@ -161,6 +175,7 @@ CREATE INDEX IF NOT EXISTS idx_medications_patient ON medications(patient_id);
 CREATE INDEX IF NOT EXISTS idx_dose_logs_patient_date ON dose_logs(patient_id, date);
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON user_sessions(session_token);
 CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_verifications(phone);
+CREATE INDEX IF NOT EXISTS idx_notification_log_lookup ON notification_log(patient_id, date);
 
 -- =============================================================================
 -- ROW LEVEL SECURITY — intentionally NOT enabled (read this before adding it)
