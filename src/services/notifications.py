@@ -65,6 +65,57 @@ class NotificationService:
         message = f"Your FamilyCare verification code is: {otp_code}\n\nThis code expires in {expiry_minutes} minutes. Do not share this code with anyone."
         return self.send_sms(to_phone, message)
 
+    # ==================== REMINDER ENGINE MESSAGES ====================
+    # SMS-only, scheduled-time-aware messages for the escalation engine
+    # (see REMINDER_ENGINE.md). Each returns send_sms's real result, so a
+    # missing phone or a failed send is False and the engine will retry —
+    # it never records a phantom send. Semi-formal copy: no emoji, no
+    # exclamation marks, per the design pillars.
+
+    def _format_time(self, hhmm: str) -> str:
+        """Render a stored 'HH:MM' dose time as '8:00 AM' for message copy."""
+        try:
+            return datetime.strptime(hhmm, "%H:%M").strftime("%-I:%M %p")
+        except (ValueError, TypeError):
+            return hhmm
+
+    def send_dose_reminder(self, patient: Dict, medication: Dict, scheduled_time: str) -> bool:
+        """T+0 reminder to the patient that a dose is due."""
+        phone = patient.get('phone')
+        if not phone:
+            return False
+        when = self._format_time(scheduled_time)
+        message = (
+            f"Time for your {medication['name']} ({medication['dosage']}), "
+            f"scheduled for {when}. Mark it in the app once you've taken it."
+        )
+        return self.send_sms(phone, message)
+
+    def send_dose_followup(self, patient: Dict, medication: Dict, scheduled_time: str) -> bool:
+        """T+30 follow-up when the dose still isn't logged."""
+        phone = patient.get('phone')
+        if not phone:
+            return False
+        when = self._format_time(scheduled_time)
+        message = (
+            f"Your {medication['name']} ({medication['dosage']}) from {when} "
+            f"isn't marked as taken yet. Please take it if you haven't already."
+        )
+        return self.send_sms(phone, message)
+
+    def send_caregiver_alert(self, caregiver: Dict, patient: Dict, medication: Dict,
+                             scheduled_time: str) -> bool:
+        """T+60 alert to a caregiver that a patient's dose is still not logged."""
+        phone = caregiver.get('phone')
+        if not phone:
+            return False
+        when = self._format_time(scheduled_time)
+        message = (
+            f"FamilyCare: {patient['name']} hasn't logged {medication['name']} "
+            f"({medication['dosage']}) scheduled for {when}. You may want to check in."
+        )
+        return self.send_sms(phone, message)
+
     def send_verification_email(self, to_email: str, user_name: str, verification_link: str) -> bool:
         """Send email verification link."""
         subject = "Verify Your FamilyCare Email"
