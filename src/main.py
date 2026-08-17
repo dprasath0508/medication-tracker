@@ -103,34 +103,25 @@ def start_scheduler():
         db = get_database()
         logger.info("Database initialized")
         
-        # Initialize scheduler
+        # Initialize scheduler and register the per-minute reminder tick +
+        # weekly reports. The tick reads due doses from the DB each minute, so
+        # new/edited medications are picked up automatically — no re-scheduling.
         scheduler = MedicationScheduler(db)
+        scheduler.start()
         logger.info("Scheduler initialized")
-        
-        # Schedule all existing medications
-        scheduler.schedule_all_medications()
-        
-        # Schedule weekly reports
-        scheduler.schedule_weekly_reports()
-        
+
         logger.info("=" * 60)
         logger.info("🎉 Medication Tracker Background Service Started!")
         logger.info("=" * 60)
-        logger.info("✅ Automated reminders: ACTIVE")
+        logger.info("✅ Reminder escalation tick: ACTIVE (every minute)")
         logger.info("✅ Weekly reports: SCHEDULED (Sundays at 6 PM)")
-        logger.info("📝 Monitoring for new medications...")
         logger.info("=" * 60)
-        
-        # Keep the service running
+
+        # Keep the service running; the scheduler thread does the work.
         try:
             while True:
-                time.sleep(60)  # Check every minute for updates
-                
-                # Re-schedule medications periodically (every hour)
-                if datetime.now().minute == 0:
-                    logger.info("Refreshing medication schedules...")
-                    scheduler.schedule_all_medications()
-                
+                time.sleep(60)
+
         except KeyboardInterrupt:
             logger.info("\n🛑 Shutting down Medication Tracker Service...")
             scheduler.stop()
