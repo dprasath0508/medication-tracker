@@ -282,6 +282,31 @@ class MedicationDB(PatientAuthorizationMixin):
         self.client.table('medications').update({'active': False}).eq('id', medication_id).execute()
         return True
 
+    def get_inactive_medications(self, caller_id, patient_id: int) -> List[Dict[str, Any]]:
+        """Get deactivated (active = False) medications for a patient (read access)."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
+        result = self.client.table('medications').select(
+            '*, users!managed_by(name)'
+        ).eq('patient_id', patient_id).eq('active', False).execute()
+
+        medications = []
+        for row in result.data:
+            med = dict(row)
+            if med.get('users'):
+                med['managed_by_name'] = med['users']['name']
+            med.pop('users', None)
+            medications.append(med)
+        return medications
+
+    def reactivate_medication(self, caller_id, medication_id: int) -> bool:
+        """Restore a soft-deleted medication (active = True). Write chokepoint."""
+        patient_id = self._get_medication_patient_id(medication_id)
+        if patient_id is None:
+            return False
+        self._assert_can_access_patient(caller_id, patient_id, "write")
+        self.client.table('medications').update({'active': True}).eq('id', medication_id).execute()
+        return True
+
     def log_dose(self, caller_id, patient_id: int, medication_name: str, scheduled_time: str,
                  taken: bool, actual_time: str = None) -> int:
         """Log a dose taken/missed. The caller is recorded as the logger."""
@@ -700,3 +725,60 @@ class MedicationDB(PatientAuthorizationMixin):
         since = (datetime.now() - timedelta(days=days)).isoformat()
         result = self.client.table('login_attempts').delete().lt('timestamp', since).execute()
         return len(result.data) if result.data else 0
+
+    # --- Reminder Engine Ledger (see REMINDER_ENGINE.md) ---
+
+    def notification_sent(self, patient_id: int, medication_name: str, scheduled_time: str,
+                          date: str, stage: str) -> bool:
+        """Whether a reminder stage for this dose on this date is already recorded."""
+        result = self.client.table('notification_log').select('id').eq(
+            'patient_id', patient_id
+        ).eq('medication_name', medication_name).eq(
+            'scheduled_time', scheduled_time
+        ).eq('date', date).eq('stage', stage).execute()
+        return bool(result.data)
+
+    def record_notification(self, patient_id: int, medication_name: str, scheduled_time: str,
+                            date: str, stage: str) -> bool:
+        """Record that a reminder stage was sent (or superseded). Idempotent.
+
+        Returns True if newly recorded, False if it already existed. The
+        client has no simple ON CONFLICT, so guard with notification_sent and
+        let the UNIQUE constraint reject a lost race (caught -> False).
+        """
+        if self.notification_sent(patient_id, medication_name, scheduled_time, date, stage):
+            return False
+        try:
+            self.client.table('notification_log').insert({
+                'patient_id': patient_id,
+                'medication_name': medication_name,
+                'scheduled_time': scheduled_time,
+                'date': date,
+                'stage': stage,
+                'sent_at': datetime.now().isoformat(),
+            }).execute()
+            return True
+        except Exception:
+            return False
+
+    def get_caregiver_contacts(self, patient_id: int) -> List[Dict[str, Any]]:
+        """Family members with a phone who share a circle with the patient.
+
+        The recipients of a caregiver escalation alert, deduped by user id.
+        """
+        patient_rows = self.client.table('family_members').select(
+            'family_circle_id'
+        ).eq('user_id', patient_id).execute()
+        circle_ids = {row['family_circle_id'] for row in patient_rows.data}
+
+        contacts = {}
+        for circle_id in circle_ids:
+            for member in self.get_family_circle_members(circle_id):
+                if member['role'] == 'family_member' and member.get('phone'):
+                    contacts[member['id']] = {
+                        'id': member['id'],
+                        'name': member['name'],
+                        'phone': member['phone'],
+                        'email': member.get('email'),
+                    }
+        return list(contacts.values())

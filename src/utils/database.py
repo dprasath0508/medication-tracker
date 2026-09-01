@@ -195,6 +195,22 @@ class MedicationDB(PatientAuthorizationMixin):
                 )
             ''')
 
+            # Reminder-engine ledger: one row per (dose, stage) that has been
+            # sent or superseded. The UNIQUE constraint makes the engine safe to
+            # run every minute and across restarts — it never double-sends.
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS notification_log (
+                    id INTEGER PRIMARY KEY,
+                    patient_id INTEGER,
+                    medication_name TEXT,
+                    scheduled_time TEXT,
+                    date TEXT,
+                    stage TEXT,
+                    sent_at TEXT,
+                    UNIQUE(patient_id, medication_name, scheduled_time, date, stage)
+                )
+            ''')
+
             # Add new columns to users table if they don't exist
             self._add_column_if_not_exists(conn, 'users', 'phone_verified', 'BOOLEAN DEFAULT 0')
             self._add_column_if_not_exists(conn, 'users', 'primary_auth_method', "TEXT DEFAULT 'phone'")
@@ -441,6 +457,34 @@ class MedicationDB(PatientAuthorizationMixin):
         self._assert_can_access_patient(caller_id, patient_id, "write")
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("UPDATE medications SET active = 0 WHERE id = ?", (medication_id,))
+        return True
+
+    def get_inactive_medications(self, caller_id, patient_id: int) -> List[Dict[str, Any]]:
+        """Get deactivated (active = 0) medications for a patient (read access)."""
+        self._assert_can_access_patient(caller_id, patient_id, "read")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute("""
+                SELECT m.*, u.name as managed_by_name
+                FROM medications m
+                LEFT JOIN users u ON m.managed_by = u.id
+                WHERE m.patient_id = ? AND m.active = 0
+            """, (patient_id,))
+            medications = []
+            for row in cursor.fetchall():
+                med = dict(row)
+                med['times'] = json.loads(med['times'])
+                medications.append(med)
+            return medications
+
+    def reactivate_medication(self, caller_id, medication_id: int) -> bool:
+        """Restore a soft-deleted medication (active = 1). Write chokepoint."""
+        patient_id = self._get_medication_patient_id(medication_id)
+        if patient_id is None:
+            return False
+        self._assert_can_access_patient(caller_id, patient_id, "write")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("UPDATE medications SET active = 1 WHERE id = ?", (medication_id,))
         return True
 
     def log_dose(self, caller_id, patient_id: int, medication_name: str, scheduled_time: str, taken: bool, actual_time: str = None) -> int:
@@ -946,3 +990,57 @@ class MedicationDB(PatientAuthorizationMixin):
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute("DELETE FROM login_attempts WHERE timestamp < ?", (since,))
             return cursor.rowcount
+
+    # --- Reminder Engine Ledger (see REMINDER_ENGINE.md) ---
+
+    def notification_sent(self, patient_id: int, medication_name: str, scheduled_time: str,
+                          date: str, stage: str) -> bool:
+        """Whether a reminder stage for this dose on this date is already recorded."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                """SELECT 1 FROM notification_log
+                   WHERE patient_id = ? AND medication_name = ? AND scheduled_time = ?
+                   AND date = ? AND stage = ?""",
+                (patient_id, medication_name, scheduled_time, date, stage),
+            )
+            return cursor.fetchone() is not None
+
+    def record_notification(self, patient_id: int, medication_name: str, scheduled_time: str,
+                            date: str, stage: str) -> bool:
+        """Record that a reminder stage was sent (or superseded). Idempotent.
+
+        Returns True if newly recorded, False if it already existed — the
+        UNIQUE constraint is the backstop against a double-send under a race.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            try:
+                conn.execute(
+                    """INSERT INTO notification_log
+                       (patient_id, medication_name, scheduled_time, date, stage, sent_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (patient_id, medication_name, scheduled_time, date, stage,
+                     datetime.now().isoformat()),
+                )
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def get_caregiver_contacts(self, patient_id: int) -> List[Dict[str, Any]]:
+        """Family members with a phone who share a circle with the patient.
+
+        The recipients of a caregiver escalation alert, deduped by user id.
+        Inherently scoped to the patient's circles (like get_family_circle_members).
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                """SELECT DISTINCT u.id, u.name, u.phone, u.email
+                   FROM users u
+                   JOIN family_members fm_caregiver ON u.id = fm_caregiver.user_id
+                   JOIN family_members fm_patient
+                     ON fm_caregiver.family_circle_id = fm_patient.family_circle_id
+                   WHERE fm_patient.user_id = ? AND u.role = 'family_member'
+                     AND u.phone IS NOT NULL AND u.phone != ''""",
+                (patient_id,),
+            )
+            return [dict(row) for row in cursor.fetchall()]

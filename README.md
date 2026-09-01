@@ -15,11 +15,23 @@ Backend runs on Supabase in production, SQLite locally.
 python3.11 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env        # then fill in the values you need
 streamlit run src/web_app.py
 ```
 
 The app auto-selects Supabase when `SUPABASE_URL` and `SUPABASE_KEY` are set,
 and falls back to SQLite (`data/medications.db`) for local development.
+
+To deliver reminders, also run the background worker (a second process):
+
+```bash
+python src/main.py --start
+```
+
+The worker needs Twilio credentials and `APP_TIMEZONE` set, and — in any
+multi-process deployment — the same Supabase as the web app (a local SQLite
+file can't be shared across processes). See
+[`REMINDER_ENGINE.md`](REMINDER_ENGINE.md) and `.env.example`.
 
 ## Security model
 
@@ -54,6 +66,33 @@ the reasoning inline.
 JWT, connect from the browser with the anon key, then enable RLS with per-table
 policies as defense in depth *behind* the application chokepoint. That is future
 work, not this sprint.
+
+## Reminders & escalation
+
+A background worker (`src/main.py --start`) delivers medication reminders over
+SMS with a two-stage escalation per dose: a patient reminder at the scheduled
+time, a follow-up 30 minutes later if the dose still isn't logged, and a
+caregiver alert at 60 minutes.
+
+The worker runs a **per-minute reconciliation tick**
+(`services/reminder_engine.py`) rather than pre-scheduled per-dose timers. Each
+minute it recomputes what should have been sent from the database and sends
+only what's outstanding, gated by a `notification_log` ledger with a uniqueness
+constraint. Two consequences:
+
+- **Restart-safe.** Pending reminders are never lost on restart — they're
+  recomputed from the DB, not held in memory.
+- **Idempotent.** A dose/stage sent once is never re-sent, even if the tick
+  overlaps a restart.
+
+After downtime, an overdue dose sends only its most-advanced stage (no burst),
+and a dose logged as taken or missed halts escalation. Full design, the locked
+decisions (single `APP_TIMEZONE`, no auto-miss), and the Railway deployment
+(web + worker, shared Supabase) are in
+[`REMINDER_ENGINE.md`](REMINDER_ENGINE.md).
+
+**Known limitation:** scheduling is timezone-naive — all dose times are
+interpreted in one `APP_TIMEZONE`. Per-user timezones are the eventual fix.
 
 ## Design system
 
