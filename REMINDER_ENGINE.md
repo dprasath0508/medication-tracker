@@ -150,6 +150,7 @@ Environment variables (set in Railway, shared to both services unless noted):
 | `TWILIO_ACCOUNT_SID` / `AUTH_TOKEN` / `PHONE_NUMBER` | ✓ | ✓ | web sends OTP, worker sends reminders. |
 | `MEDSYNC_OTP_SECRET` | ✓ | – | OTP hashing (web only). |
 | `APP_TIMEZONE` | ✓ | ✓ | Dose scheduling + display. |
+| `APP_BASE_URL` | ✓ | – | Public base for emailed verify/reset links; defaults to localhost. |
 | `EMAIL_*` | ✓ | ✓ | Optional fallback / weekly reports. |
 
 ## Known limitations (document, don't fix here)
@@ -160,6 +161,3 @@ Environment variables (set in Railway, shared to both services unless noted):
   shipped.
 - Per-minute full scan of active meds is fine at current scale; add a
   due-dose query/index if patient volume grows.
-- Email verify/reset links hardcode `http://localhost:8501`
-  (`services/auth.py`); a real deployment needs an `APP_BASE_URL`. Unrelated to
-  SMS/OTP, tracked separately.

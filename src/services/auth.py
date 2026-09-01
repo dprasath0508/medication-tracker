@@ -41,6 +41,21 @@ if not _OTP_SECRET:
 _OTP_SECRET_BYTES = _OTP_SECRET.encode()
 
 
+# Base URL used to build the email verification and password-reset links. In
+# local dev the Streamlit app serves on :8501, which is the default here so
+# nothing changes for a developer. In a real deployment the emailed link must
+# point at the public domain, so set APP_BASE_URL (e.g. https://app.example.com).
+# Trailing slashes are stripped so the "{base}/?verify_email=..." join never
+# produces a double slash. Resolved once at import, matching APP_TIMEZONE.
+APP_BASE_URL = os.getenv('APP_BASE_URL', 'http://localhost:8501').rstrip('/')
+if 'localhost' in APP_BASE_URL or '127.0.0.1' in APP_BASE_URL:
+    logger.warning(
+        "APP_BASE_URL is %r; emailed verify/reset links will point at localhost. "
+        "Set APP_BASE_URL to the public domain in production.",
+        APP_BASE_URL,
+    )
+
+
 class AuthService:
     """Core authentication service handling phone OTP, email/password, and sessions."""
 
@@ -448,7 +463,7 @@ class AuthService:
         self.db.set_email_verification_token(user_id, token, expiry_hours=24)
 
         if self.notifications:
-            verification_link = f"http://localhost:8501/?verify_email={token}"
+            verification_link = f"{APP_BASE_URL}/?verify_email={token}"
             subject = "Verify Your FamilyCare Email"
             body = f"Click the link to verify your email: {verification_link}"
             html = f"""
@@ -488,7 +503,7 @@ class AuthService:
                 self.db.set_password_reset_token(user['id'], token, expiry_hours=1)
 
                 if self.notifications:
-                    reset_link = f"http://localhost:8501/?reset_password={token}"
+                    reset_link = f"{APP_BASE_URL}/?reset_password={token}"
                     subject = "Reset Your FamilyCare Password"
                     body = f"Click the link to reset your password: {reset_link}"
                     html = f"""
